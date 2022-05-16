@@ -111,7 +111,7 @@ import Data.Maybe (Maybe(Just, Nothing), fromJust, maybe)
 import Data.Sequence (Seq)
 import Data.Sequence as Seq
 import Data.Symbol (class IsSymbol, reflectSymbol)
-import Data.Traversable (class Traversable, for, sequence)
+import Data.Traversable (class Traversable, for, sequence, traverse)
 import Data.Tuple (Tuple(Tuple))
 import Data.Typelevel.Undefined (undefined)
 import Data.UInt (UInt)
@@ -491,7 +491,11 @@ instance DecodeAeson Number where
 instance DecodeAeson Aeson where
   decodeAeson = pure
 
-instance
+instance DecodeAeson a => DecodeAeson (Object a) where
+  decodeAeson = caseAesonObject (Left (TypeMismatch "Expected Object"))
+    (traverse decodeAeson)
+
+else instance
   ( GDecodeAeson row list
   , RL.RowToList row list
   ) =>
@@ -645,7 +649,26 @@ instance EncodeAeson Aeson where
     pure $
       (Aeson { patchedJson: AesonPatchedJson (bumpIndices json), numberIndex })
 
-instance
+instance EncodeAeson a => EncodeAeson (Object a) where
+  encodeAeson' input = do
+    Tuple obj indices <-
+      foldr step (Tuple FO.empty Seq.empty) <<< FO.toUnfoldable <$>
+      sequence (encodeAeson' <$> input)
+    pure $ Aeson
+      { patchedJson: AesonPatchedJson (fromObject obj)
+      , numberIndex: fold indices
+      }
+    where
+    step
+      :: Tuple String Aeson
+      -> Tuple (Object Json) (Seq (Seq String))
+      -> Tuple (Object Json) (Seq (Seq String))
+    step
+      (Tuple k (Aeson { patchedJson: AesonPatchedJson json, numberIndex }))
+      (Tuple obj indices) =
+      Tuple (FO.insert k json obj) (Seq.cons numberIndex indices)
+
+else instance
   ( GEncodeAeson row list
   , RL.RowToList row list
   ) =>

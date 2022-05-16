@@ -27,7 +27,6 @@ import Control.Monad.Cont (lift)
 import Data.Argonaut (encodeJson, parseJson)
 import Data.Argonaut as Json
 import Data.Array (head, zip, (!!))
-import Data.BigInt as BigInt
 import Data.Either (Either(Right, Left), hush)
 import Data.Maybe (Maybe(Nothing, Just), fromJust, fromMaybe, isJust)
 import Data.Newtype (unwrap)
@@ -37,6 +36,7 @@ import Data.Tuple (Tuple(Tuple), uncurry)
 import Data.Tuple.Nested ((/\))
 import Effect.Class (liftEffect)
 import Effect.Exception (error, throwException)
+import Foreign.Object as FO
 import Mote (group, test)
 import Node.Encoding (Encoding(UTF8))
 import Node.FS.Aff (readTextFile, readdir)
@@ -60,6 +60,10 @@ suite = do
       let
         expected = { a: 10 }
       decodeJsonString "{\"a\": 10}" `shouldEqual` Right expected
+    test "Object" $ liftEffect do
+      let
+        expected = FO.fromFoldable [ "a" /\ 1, "b" /\ 2 ]
+      decodeAeson (encodeAeson expected) `shouldEqual` Right expected
 
   group "Object field accessing" do
     let
