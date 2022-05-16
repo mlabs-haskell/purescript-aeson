@@ -73,6 +73,7 @@ module Aeson
   , toArray
   , toObject
   , fromString
+  , aesonNull
   ) where
 
 import Prelude
@@ -446,6 +447,10 @@ toObject = toAesonType caseAesonObject
 fromString :: String -> Aeson
 fromString str = Aeson
   { patchedJson: AesonPatchedJson (Argonaut.fromString str), numberIndex: mempty }
+
+aesonNull :: Aeson
+aesonNull = Aeson
+  { patchedJson: AesonPatchedJson jsonNull, numberIndex: mempty }
 
 -------- Decode helpers --------
 
