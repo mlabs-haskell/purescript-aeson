@@ -52,71 +52,10 @@ import Test.QuickCheck (quickCheck', (<?>))
 import Test.Spec.Assertions (shouldEqual)
 import Test.Utils (assertTrue)
 import TestM (TestPlanM)
-import Types.ByteArray (hexToByteArrayUnsafe)
-import Types.PlutusData (PlutusData(Integer, Bytes, List, Map, Constr))
 
 suite :: TestPlanM Unit
 suite = do
   group "Aeson encode" do
-    test "Integer" $ liftEffect do
-      let
-        expected =
-          Integer $ unsafePartial $ fromJust $ BigInt.fromString
-            "999999999999999999999999"
-      decodeJsonString "999999999999999999999999" `shouldEqual` Right expected
-
-  group "Aeson decoder" do
-    test "Integer" $ liftEffect do
-      let
-        expected =
-          Integer $ unsafePartial $ fromJust $ BigInt.fromString
-            "999999999999999999999999"
-      decodeJsonString "999999999999999999999999" `shouldEqual` Right expected
-    test "Bytes" $ liftEffect do
-      let
-        expected =
-          Bytes $ hexToByteArrayUnsafe "00FFAA"
-      decodeJsonString "\"00FFAA\"" `shouldEqual` Right expected
-    test "List" $ liftEffect do
-      let
-        expected =
-          List
-            [ Bytes $ hexToByteArrayUnsafe "00FFAA"
-            , Integer $ BigInt.fromInt 1
-            ]
-      decodeJsonString "[\"00FFAA\", 1]" `shouldEqual` Right expected
-    test "Map #1" $ liftEffect do
-      let
-        expected =
-          Map
-            [ Bytes (hexToByteArrayUnsafe "00FFAA") /\ Integer
-                (BigInt.fromInt 1)
-            ]
-      decodeJsonString "{\"map\": [ { \"key\": \"00FFAA\", \"value\": 1 } ] }"
-        `shouldEqual` Right
-          expected
-    test "Map #2" $ liftEffect do
-      let
-        input =
-          "{\"map\": \
-          \ [ { \"key\": \"00FFAA\", \"value\": 1 },\
-          \   { \"key\": \"AAAA\", \"value\": 200 } ] }"
-        expected = Map
-          [ Bytes (hexToByteArrayUnsafe "00FFAA") /\ Integer (BigInt.fromInt 1)
-          , Bytes (hexToByteArrayUnsafe "AAAA") /\ Integer (BigInt.fromInt 200)
-          ]
-      decodeJsonString input `shouldEqual` Right expected
-    test "Constr" $ liftEffect do
-      let
-        input =
-          "{\"constr\": 1, \"fields\": [ 1, 2, 3 ] }"
-        expected = Constr (BigInt.fromInt 1)
-          [ Integer $ BigInt.fromInt 1
-          , Integer $ BigInt.fromInt 2
-          , Integer $ BigInt.fromInt 3
-          ]
-      decodeJsonString input `shouldEqual` Right expected
-
     test "Record" $ liftEffect do
       let
         expected = { a: 10 }
