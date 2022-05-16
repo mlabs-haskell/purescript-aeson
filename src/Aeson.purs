@@ -59,8 +59,20 @@ module Aeson
   , jsonToAeson
   , parseJsonStringToAeson
   , stringifyAeson
-  , toObject
   , toStringifiedNumbersJson
+  , isNull
+  , isBoolean
+  , isNumber
+  , isString
+  , isArray
+  , isObject
+  , toNull
+  , toBoolean
+  , toNumber
+  , toString
+  , toArray
+  , toObject
+  , fromString
   ) where
 
 import Prelude
@@ -80,10 +92,10 @@ import Data.Argonaut
   , encodeJson
   , fromArray
   , fromObject
-  , isNull
   , jsonNull
   , stringify
   )
+import Data.Argonaut (isNull, fromString) as Argonaut
 import Data.Argonaut.Encode.Encoders (encodeBoolean, encodeString, encodeUnit)
 import Data.Argonaut.Parser (jsonParser)
 import Data.Array (foldr, fromFoldable)
@@ -93,7 +105,7 @@ import Data.BigInt (BigInt)
 import Data.BigInt as BigInt
 import Data.Either (Either(Right, Left), fromRight, note)
 import Data.Foldable (fold, foldM)
-import Data.Int (round, toNumber)
+import Data.Int (round)
 import Data.Int as Int
 import Data.Maybe (Maybe(Just, Nothing), fromJust, maybe)
 import Data.Sequence (Seq)
@@ -259,7 +271,7 @@ getFieldOptional' = getFieldOptional'_ decodeAeson
     maybe (pure Nothing) decode (FO.lookup str obj)
     where
     decode aeson@(Aeson { patchedJson: AesonPatchedJson json }) =
-      if isNull json then
+      if Argonaut.isNull json then
         pure Nothing
       else
         Just <$> (lmap (AtKey str) <<< decoder) aeson
@@ -331,10 +343,6 @@ constAesonCases v =
   c :: forall (b :: Type). b -> a
   c = const v
 
-toObject :: Aeson -> Maybe (Object Aeson)
-toObject =
-  caseAeson $ constAesonCases Nothing # _ { caseObject = Just }
-
 caseAesonObject :: forall (a :: Type). a -> (Object Aeson -> a) -> Aeson -> a
 caseAesonObject def f = caseAeson (constAesonCases def # _ { caseObject = f })
 
@@ -367,6 +375,77 @@ caseAesonBigInt def f = caseAesonNumber def \str ->
 
 caseAesonNull :: forall (a :: Type). a -> (Unit -> a) -> Aeson -> a
 caseAesonNull def f = caseAeson (constAesonCases def # _ { caseNull = f })
+
+verbAesonType :: forall a b. b -> (a -> b) -> (b -> (a -> b) -> Aeson -> b) -> Aeson -> b
+verbAesonType def f g = g def f
+
+isAesonType :: forall a. (Boolean -> (a -> Boolean) -> Aeson -> Boolean) -> Aeson -> Boolean
+isAesonType = verbAesonType false (const true)
+
+-- | Check if the provided `Json` is the `null` value
+isNull :: Aeson -> Boolean
+isNull = isAesonType caseAesonNull
+
+-- | Check if the provided `Aeson` is a `Boolean`
+isBoolean :: Aeson -> Boolean
+isBoolean = isAesonType caseAesonBoolean
+
+-- | Check if the provided `Aeson` is a `Number`
+isNumber :: Aeson -> Boolean
+isNumber = isAesonType caseAesonNumber
+
+-- | Check if the provided `Aeson` is a `String`
+isString :: Aeson -> Boolean
+isString = isAesonType caseAesonString
+
+-- | Check if the provided `Aeson` is an `Array`
+isArray :: Aeson -> Boolean
+isArray = isAesonType caseAesonArray
+
+-- | Check if the provided `Aeson` is an `Object`
+isObject :: Aeson -> Boolean
+isObject = isAesonType caseAesonObject
+
+toAesonType
+  :: forall a
+   . (Maybe a -> (a -> Maybe a) -> Aeson -> Maybe a)
+  -> Aeson
+  -> Maybe a
+toAesonType = verbAesonType Nothing Just
+
+-- | Convert `Aeson` to the `Unit` value if the `Aeson` is the null value
+toNull :: Aeson -> Maybe Unit
+toNull = toAesonType caseAesonNull
+
+-- | Convert `Aeson` to a `Boolean` value, if the `Aeson` is a boolean.
+toBoolean :: Aeson -> Maybe Boolean
+toBoolean = toAesonType caseAesonBoolean
+
+-- | Convert `Aeson` to a `Number` value, if the `Aeson` is a number.
+toNumber :: Aeson -> Maybe String
+toNumber = toAesonType caseAesonNumber
+
+-- | Convert `Aeson` to a `String` value, if the `Aeson` is a string. To write a
+-- | `Aeson` value to a JSON string, see `stringify`.
+toString :: Aeson -> Maybe String
+toString = toAesonType caseAesonString
+
+-- | Convert `Aeson` to an `Array` of `Aeson` values, if the `Aeson` is an array.
+toArray :: Aeson -> Maybe (Array Aeson)
+toArray = toAesonType caseAesonArray
+
+-- | Convert `Aeson` to an `Object` of `Aeson` values, if the `Aeson` is an object.
+toObject :: Aeson -> Maybe (Object Aeson)
+toObject = toAesonType caseAesonObject
+
+-- | Construct the `Json` representation of a `String` value.
+-- | Note that this function only produces `Json` containing a single piece of `String`
+-- | data (similar to `fromBoolean`, `fromNumber`, etc.).
+-- | This function does NOT convert the `String` encoding of a JSON value to `Json` - For that
+-- | purpose, you'll need to use `jsonParser`.
+fromString :: String -> Aeson
+fromString str = Aeson
+  { patchedJson: AesonPatchedJson (Argonaut.fromString str), numberIndex: mempty }
 
 -------- Decode helpers --------
 
@@ -561,7 +640,7 @@ instance EncodeAeson Aeson where
         encodeString
         (fromArray <<< map bumpIndices)
         (fromObject <<< map bumpIndices)
-      encodeNumber n = encodeJson $ toNumber ix + n
+      encodeNumber n = encodeJson $ Int.toNumber ix + n
     bumpNumberIndexBy (Seq.length numberIndex)
     pure $
       (Aeson { patchedJson: AesonPatchedJson (bumpIndices json), numberIndex })
