@@ -73,6 +73,9 @@ module Aeson
   , toArray
   , toObject
   , fromString
+  , aesonNull
+  , encodeTraversable
+  , decodeTraversable
   ) where
 
 import Prelude
@@ -98,20 +101,22 @@ import Data.Argonaut
 import Data.Argonaut (isNull, fromString) as Argonaut
 import Data.Argonaut.Encode.Encoders (encodeBoolean, encodeString, encodeUnit)
 import Data.Argonaut.Parser (jsonParser)
-import Data.Array (foldr, fromFoldable)
+import Data.Array (foldr, fromFoldable, (!!))
 import Data.Bifunctor (lmap)
-import Data.Number as Number
 import Data.BigInt (BigInt)
 import Data.BigInt as BigInt
 import Data.Either (Either(Right, Left), fromRight, note)
 import Data.Foldable (fold, foldM)
 import Data.Int (round)
 import Data.Int as Int
+import Data.List as L
+import Data.List.Lazy as LL
 import Data.Maybe (Maybe(Just, Nothing), fromJust, maybe)
+import Data.Number as Number
 import Data.Sequence (Seq)
 import Data.Sequence as Seq
 import Data.Symbol (class IsSymbol, reflectSymbol)
-import Data.Traversable (class Traversable, for, sequence)
+import Data.Traversable (class Traversable, for, sequence, traverse)
 import Data.Tuple (Tuple(Tuple))
 import Data.Typelevel.Undefined (undefined)
 import Data.UInt (UInt)
@@ -447,6 +452,10 @@ fromString :: String -> Aeson
 fromString str = Aeson
   { patchedJson: AesonPatchedJson (Argonaut.fromString str), numberIndex: mempty }
 
+aesonNull :: Aeson
+aesonNull = Aeson
+  { patchedJson: AesonPatchedJson jsonNull, numberIndex: mempty }
+
 -------- Decode helpers --------
 
 -- | Ignore numeric index and reuse Argonaut decoder.
@@ -491,6 +500,19 @@ instance DecodeAeson Number where
 instance DecodeAeson Aeson where
   decodeAeson = pure
 
+instance DecodeAeson a => DecodeAeson (Object a) where
+  decodeAeson = caseAesonObject (Left (TypeMismatch "Expected Object"))
+    (traverse decodeAeson)
+
+instance (DecodeAeson a, DecodeAeson b) => DecodeAeson (Tuple a b) where
+  decodeAeson = caseAesonArray (Left (TypeMismatch "Expected Array (Tuple)"))
+    \arr ->
+      case arr !! 0, arr !! 1, arr !! 2 of
+        Just a, Just b, Nothing ->
+          Tuple <$> decodeAeson a <*> decodeAeson b
+        _, _, _ ->
+          Left (TypeMismatch "Expected Array with length 2")
+
 instance
   ( GDecodeAeson row list
   , RL.RowToList row list
@@ -501,7 +523,7 @@ instance
       Just object -> gDecodeAeson object (Proxy :: Proxy list)
       Nothing -> Left $ TypeMismatch "Object"
 
-else instance
+instance
   ( InOneOf b a b
   , DecodeAeson a
   , DecodeAeson b
@@ -511,15 +533,41 @@ else instance
     asOneOf <$> (decodeAeson j :: Either JsonDecodeError a)
       <|> asOneOf <$> (decodeAeson j :: Either JsonDecodeError b)
 
-else instance
-  ( Traversable t
-  , DecodeAeson a
-  , DecodeJson (t Json)
-  ) =>
-  DecodeAeson (t a) where
-  decodeAeson (Aeson { numberIndex, patchedJson: AesonPatchedJson pJson }) = do
-    jsons :: t _ <- map AesonPatchedJson <$> decodeJson pJson
-    for jsons (\patchedJson -> decodeAeson (Aeson { patchedJson, numberIndex }))
+instance DecodeAeson a => DecodeAeson (Array a) where
+  decodeAeson = decodeTraversable
+
+instance DecodeAeson a => DecodeAeson (L.List a) where
+  decodeAeson = decodeTraversable
+
+instance DecodeAeson a => DecodeAeson (LL.List a) where
+  decodeAeson = map L.toUnfoldable <<< decodeTraversable
+
+instance DecodeAeson a => DecodeAeson (Seq a) where
+  decodeAeson = map L.toUnfoldable <<< decodeTraversable
+
+instance DecodeAeson a => DecodeAeson (Maybe a) where
+  decodeAeson aeson =
+    caseAeson
+    { caseNull: const $ Right Nothing
+    , caseBoolean: const $ decodeAeson aeson
+    , caseNumber: const $ decodeAeson aeson
+    , caseString: const $ decodeAeson aeson
+    , caseArray: const $ decodeAeson aeson
+    , caseObject: const $ decodeAeson aeson
+    }
+    aeson
+
+decodeTraversable
+  :: forall t a
+  .  Traversable t
+  => DecodeAeson a
+  => DecodeJson (t Json)
+  => Aeson
+  -> Either JsonDecodeError (t a)
+decodeTraversable (Aeson { numberIndex, patchedJson: AesonPatchedJson pJson }) = do
+    jsons :: t Json <- decodeJson pJson
+    for jsons \patchedJson -> do
+      decodeAeson (Aeson { patchedJson: AesonPatchedJson patchedJson, numberIndex })
 
 class
   GDecodeAeson (row :: Row Type) (list :: RL.RowList Type)
@@ -571,7 +619,10 @@ class EncodeAeson (a :: Type) where
   encodeAeson' :: a -> AesonEncoder Aeson
 
 encodeAeson :: forall a. EncodeAeson a => a -> Aeson
-encodeAeson a = encodeAeson' a # \(AesonEncoder s) -> evalState s 0
+encodeAeson = runEncoder <<< encodeAeson'
+
+runEncoder :: forall a. AesonEncoder a -> a
+runEncoder (AesonEncoder s) = evalState s 0
 
 newtype AesonEncoder a = AesonEncoder (State Int a)
 
@@ -645,6 +696,25 @@ instance EncodeAeson Aeson where
     pure $
       (Aeson { patchedJson: AesonPatchedJson (bumpIndices json), numberIndex })
 
+instance EncodeAeson a => EncodeAeson (Object a) where
+  encodeAeson' input = do
+    Tuple obj indices <-
+      foldr step (Tuple FO.empty Seq.empty) <<< FO.toUnfoldable <$>
+      sequence (encodeAeson' <$> input)
+    pure $ Aeson
+      { patchedJson: AesonPatchedJson (fromObject obj)
+      , numberIndex: fold indices
+      }
+    where
+    step
+      :: Tuple String Aeson
+      -> Tuple (Object Json) (Seq (Seq String))
+      -> Tuple (Object Json) (Seq (Seq String))
+    step
+      (Tuple k (Aeson { patchedJson: AesonPatchedJson json, numberIndex }))
+      (Tuple obj indices) =
+      Tuple (FO.insert k json obj) (Seq.cons numberIndex indices)
+
 instance
   ( GEncodeAeson row list
   , RL.RowToList row list
@@ -667,8 +737,39 @@ instance
       (Tuple k (Aeson { patchedJson: AesonPatchedJson json, numberIndex }))
       (Tuple obj indices) =
       Tuple (FO.insert k json obj) (Seq.cons numberIndex indices)
-else instance (Traversable t, EncodeAeson a) => EncodeAeson (t a) where
-  encodeAeson' arr = do
+
+instance (EncodeAeson a, EncodeAeson b) => EncodeAeson (Tuple a b) where
+  encodeAeson' (Tuple a b) = encodeTraversable' [ encodeAeson a, encodeAeson b ]
+
+instance EncodeAeson a => EncodeAeson (Array a) where
+  encodeAeson' = encodeTraversable'
+
+instance EncodeAeson a => EncodeAeson (L.List a) where
+  encodeAeson' = encodeTraversable'
+
+instance EncodeAeson a => EncodeAeson (LL.List a) where
+  encodeAeson' = encodeTraversable'
+
+instance EncodeAeson a => EncodeAeson (Seq a) where
+  encodeAeson' = encodeTraversable'
+
+instance EncodeAeson a => EncodeAeson (Maybe a) where
+  encodeAeson' Nothing = pure aesonNull
+  encodeAeson' (Just a) = encodeAeson' a
+
+encodeTraversable
+  :: forall (t :: Type -> Type) (a :: Type)
+  .  Traversable t
+  => EncodeAeson a
+  => t a -> Aeson
+encodeTraversable = runEncoder <<< encodeTraversable'
+
+encodeTraversable'
+  :: forall (t :: Type -> Type) (a :: Type)
+  .  Traversable t
+  => EncodeAeson a
+  => t a -> AesonEncoder Aeson
+encodeTraversable' arr = do
     Tuple jsonArr indices <- foldM step (Tuple Seq.empty Seq.empty) arr
     pure $ Aeson
       { patchedJson: AesonPatchedJson (fromArray $ fromFoldable jsonArr)

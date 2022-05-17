@@ -21,6 +21,7 @@ You can edit this file as you like.
   , "gen"
   , "identity"
   , "integers"
+  , "lists"
   , "maybe"
   , "medea"
   , "mote"
