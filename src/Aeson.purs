@@ -76,6 +76,7 @@ module Aeson
   , aesonNull
   , encodeTraversable
   , decodeTraversable
+  , module X
   ) where
 
 import Prelude
@@ -98,6 +99,16 @@ import Data.Argonaut
   , jsonNull
   , stringify
   )
+import Data.Argonaut
+  ( JsonDecodeError
+    ( TypeMismatch
+    , UnexpectedValue
+    , AtIndex
+    , AtKey
+    , Named
+    , MissingValue
+    )
+  ) as X
 import Data.Argonaut (isNull, fromString) as Argonaut
 import Data.Argonaut.Encode.Encoders (encodeBoolean, encodeString, encodeUnit)
 import Data.Argonaut.Parser (jsonParser)
