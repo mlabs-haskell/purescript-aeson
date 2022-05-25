@@ -64,6 +64,10 @@ suite = do
       let
         expected = FO.fromFoldable [ "a" /\ 1, "b" /\ 2 ]
       decodeAeson (encodeAeson expected) `shouldEqual` Right expected
+    test "Maybe" $ liftEffect do
+      let
+        expected = Just 1
+      decodeAeson (encodeAeson expected) `shouldEqual` Right expected
 
   group "Object field accessing" do
     let
