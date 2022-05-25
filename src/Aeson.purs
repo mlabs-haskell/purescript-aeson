@@ -559,12 +559,12 @@ instance DecodeAeson a => DecodeAeson (Seq a) where
 instance DecodeAeson a => DecodeAeson (Maybe a) where
   decodeAeson aeson =
     caseAeson
-    { caseNull: const $ Right Nothing
-    , caseBoolean: const $ decodeAeson aeson
-    , caseNumber: const $ decodeAeson aeson
-    , caseString: const $ decodeAeson aeson
-    , caseArray: const $ decodeAeson aeson
-    , caseObject: const $ decodeAeson aeson
+    { caseNull: \_ -> Right Nothing
+    , caseBoolean: \_ -> Just <$> decodeAeson aeson
+    , caseNumber: \_ -> Just <$> decodeAeson aeson
+    , caseString: \_ -> Just <$> decodeAeson aeson
+    , caseArray: \_ -> Just <$> decodeAeson aeson
+    , caseObject: \_ -> Just <$> decodeAeson aeson
     }
     aeson
 
