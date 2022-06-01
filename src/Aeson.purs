@@ -733,8 +733,8 @@ instance
   EncodeAeson (Record row) where
   encodeAeson' rec = do
     Tuple obj indices <-
-      foldr step (Tuple FO.empty Seq.empty) <<< FO.toUnfoldable <$>
-        (sequence $ gEncodeAeson rec (Proxy :: Proxy list))
+      foldr step (Tuple FO.empty Seq.empty) <$> traverse sequence
+        (FO.toUnfoldable $ gEncodeAeson rec (Proxy :: Proxy list))
     pure $ Aeson
       { patchedJson: AesonPatchedJson (fromObject obj)
       , numberIndex: fold indices
