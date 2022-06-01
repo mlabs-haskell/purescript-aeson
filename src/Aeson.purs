@@ -710,8 +710,8 @@ instance EncodeAeson Aeson where
 instance EncodeAeson a => EncodeAeson (Object a) where
   encodeAeson' input = do
     Tuple obj indices <-
-      foldr step (Tuple FO.empty Seq.empty) <<< FO.toUnfoldable <$>
-      sequence (encodeAeson' <$> input)
+      foldr step (Tuple FO.empty Seq.empty) <$>
+      traverse (traverse encodeAeson') (FO.toUnfoldable input)
     pure $ Aeson
       { patchedJson: AesonPatchedJson (fromObject obj)
       , numberIndex: fold indices
