@@ -108,6 +108,7 @@ import Data.Argonaut
     , Named
     , MissingValue
     )
+  , printJsonDecodeError
   ) as X
 import Data.Argonaut (isNull, fromString) as Argonaut
 import Data.Argonaut.Encode.Encoders (encodeBoolean, encodeString, encodeUnit)
