@@ -25,6 +25,7 @@ module Aeson
   , AesonEncoder
   , NumberIndex
   , class EncodeAeson
+  , class EncodeAeson'
   , class GEncodeAeson
   , class DecodeAeson
   , class DecodeAesonField
@@ -628,10 +629,10 @@ else instance DecodeAeson a => DecodeAesonField a where
 -------- EncodeAeson --------
 
 class EncodeAeson (a :: Type) where
-  encodeAeson' :: a -> AesonEncoder Aeson
+  encodeAeson :: a -> Aeson
 
-encodeAeson :: forall a. EncodeAeson a => a -> Aeson
-encodeAeson = runEncoder <<< encodeAeson'
+class EncodeAeson' (a :: Type) where
+  encodeAeson' :: a -> AesonEncoder Aeson
 
 runEncoder :: forall a. AesonEncoder a -> a
 runEncoder (AesonEncoder s) = evalState s 0
@@ -657,7 +658,7 @@ encodeAesonViaJson :: forall a. EncodeJson a => a -> AesonEncoder Aeson
 encodeAesonViaJson v = pure $ Aeson
   { patchedJson: AesonPatchedJson $ encodeJson v, numberIndex: Seq.empty }
 
-instance EncodeAeson Int where
+instance EncodeAeson' Int where
   encodeAeson' i = do
     ix <- useNextIndexIndex
     pure $ Aeson
@@ -665,7 +666,7 @@ instance EncodeAeson Int where
       , numberIndex: Seq.singleton (show i)
       }
 
-instance EncodeAeson BigInt where
+else instance EncodeAeson' BigInt where
   encodeAeson' i = do
     ix <- useNextIndexIndex
     pure $ Aeson
@@ -673,7 +674,7 @@ instance EncodeAeson BigInt where
       , numberIndex: Seq.singleton (BigInt.toString i)
       }
 
-instance EncodeAeson UInt where
+else instance EncodeAeson' UInt where
   encodeAeson' i = do
     ix <- useNextIndexIndex
     pure $ Aeson
@@ -681,7 +682,7 @@ instance EncodeAeson UInt where
       , numberIndex: Seq.singleton (UInt.toString i)
       }
 
-instance EncodeAeson Number where
+else instance EncodeAeson' Number where
   encodeAeson' i = do
     ix <- useNextIndexIndex
     pure $ Aeson
@@ -689,13 +690,13 @@ instance EncodeAeson Number where
       , numberIndex: Seq.singleton (show i)
       }
 
-instance EncodeAeson String where
+else instance EncodeAeson' String where
   encodeAeson' = encodeAesonViaJson
 
-instance EncodeAeson Boolean where
+else instance EncodeAeson' Boolean where
   encodeAeson' = encodeAesonViaJson
 
-instance EncodeAeson Aeson where
+else instance EncodeAeson' Aeson where
   encodeAeson' (Aeson { patchedJson: AesonPatchedJson json, numberIndex }) = do
     ix <- getCurrentNumberIndex
     let
@@ -708,7 +709,7 @@ instance EncodeAeson Aeson where
     pure $
       (Aeson { patchedJson: AesonPatchedJson (bumpIndices json), numberIndex })
 
-instance EncodeAeson a => EncodeAeson (Object a) where
+else instance EncodeAeson' a => EncodeAeson' (Object a) where
   encodeAeson' input = do
     Tuple obj indices <-
       foldr step (Tuple FO.empty Seq.empty) <<< FO.toUnfoldable <$>
@@ -727,11 +728,11 @@ instance EncodeAeson a => EncodeAeson (Object a) where
       (Tuple obj indices) =
       Tuple (FO.insert k json obj) (Seq.cons numberIndex indices)
 
-instance
+else instance
   ( GEncodeAeson row list
   , RL.RowToList row list
   ) =>
-  EncodeAeson (Record row) where
+  EncodeAeson' (Record row) where
   encodeAeson' rec = do
     Tuple obj indices <-
       foldr step (Tuple FO.empty Seq.empty) <<< FO.toUnfoldable <$>
@@ -750,24 +751,27 @@ instance
       (Tuple obj indices) =
       Tuple (FO.insert k json obj) (Seq.cons numberIndex indices)
 
-instance (EncodeAeson a, EncodeAeson b) => EncodeAeson (Tuple a b) where
+else instance (EncodeAeson a, EncodeAeson b) => EncodeAeson' (Tuple a b) where
   encodeAeson' (Tuple a b) = encodeTraversable' [ encodeAeson a, encodeAeson b ]
 
-instance EncodeAeson a => EncodeAeson (Array a) where
+else instance EncodeAeson' a => EncodeAeson' (Array a) where
   encodeAeson' = encodeTraversable'
 
-instance EncodeAeson a => EncodeAeson (L.List a) where
+else instance EncodeAeson' a => EncodeAeson' (L.List a) where
   encodeAeson' = encodeTraversable'
 
-instance EncodeAeson a => EncodeAeson (LL.List a) where
+else instance EncodeAeson' a => EncodeAeson' (LL.List a) where
   encodeAeson' = encodeTraversable'
 
-instance EncodeAeson a => EncodeAeson (Seq a) where
+else instance EncodeAeson' a => EncodeAeson' (Seq a) where
   encodeAeson' = encodeTraversable'
 
-instance EncodeAeson a => EncodeAeson (Maybe a) where
+else instance EncodeAeson' a => EncodeAeson' (Maybe a) where
   encodeAeson' Nothing = pure aesonNull
   encodeAeson' (Just a) = encodeAeson' a
+
+else instance EncodeAeson a => EncodeAeson' a where
+  encodeAeson' = encodeAeson' <<< encodeAeson
 
 encodeTraversable
   :: forall (t :: Type -> Type) (a :: Type)
@@ -779,7 +783,7 @@ encodeTraversable = runEncoder <<< encodeTraversable'
 encodeTraversable'
   :: forall (t :: Type -> Type) (a :: Type)
   .  Traversable t
-  => EncodeAeson a
+  => EncodeAeson' a
   => t a -> AesonEncoder Aeson
 encodeTraversable' arr = do
     Tuple jsonArr indices <- foldM step (Tuple Seq.empty Seq.empty) arr
