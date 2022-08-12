@@ -23,7 +23,6 @@ module Aeson
   , Aeson
   , AesonCases
   , AesonEncoder
-  , NumberIndex
   , class EncodeAeson
   , class GEncodeAeson
   , class DecodeAeson
@@ -52,7 +51,6 @@ module Aeson
   , getFieldOptional
   , getFieldOptional'
   , getNestedAeson
-  , getNumberIndex
   , jsonToAeson
   , parseJsonStringToAeson
   , stringifyAeson
@@ -205,9 +203,6 @@ jsonToAeson = stringify >>> decodeJsonString >>> fromRight shouldNotHappen
   where
   -- valid json should always decode without errors
   shouldNotHappen = undefined
-
-getNumberIndex :: Aeson -> NumberIndex
-getNumberIndex (Aeson { numberIndex }) = numberIndex
 
 -------- Aeson manipulation and field accessors --------
 
