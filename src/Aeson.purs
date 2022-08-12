@@ -51,6 +51,7 @@ module Aeson
   , getFieldOptional
   , getFieldOptional'
   , getNestedAeson
+  , getNumberIndex
   , jsonToAeson
   , parseJsonStringToAeson
   , stringifyAeson
@@ -203,6 +204,9 @@ jsonToAeson = stringify >>> decodeJsonString >>> fromRight shouldNotHappen
   where
   -- valid json should always decode without errors
   shouldNotHappen = undefined
+
+getNumberIndex :: Aeson -> NumberIndex
+getNumberIndex (Aeson { numberIndex }) = numberIndex
 
 -------- Aeson manipulation and field accessors --------
 
@@ -708,8 +712,8 @@ instance EncodeAeson Aeson where
 instance EncodeAeson a => EncodeAeson (Object a) where
   encodeAeson' input = AesonEncoder do
     Tuple obj indices <-
-      foldr step (Tuple FO.empty Seq.empty) <<< FO.toUnfoldable <$>
-      sequence (unAesonEncoder <<< encodeAeson' <$> input)
+      foldr step (Tuple FO.empty Seq.empty) <$>
+      traverse (traverse (unAesonEncoder <<< encodeAeson')) (FO.toUnfoldable input)
     pure $ Aeson
       { patchedJson: AesonPatchedJson (fromObject obj)
       , numberIndex: fold indices
@@ -731,8 +735,8 @@ instance
   EncodeAeson (Record row) where
   encodeAeson' rec = AesonEncoder do
     Tuple obj indices <-
-      foldr step (Tuple FO.empty Seq.empty) <<< FO.toUnfoldable <$>
-        (sequence $ map unAesonEncoder $ gEncodeAeson rec (Proxy :: Proxy list))
+      foldr step (Tuple FO.empty Seq.empty) <$> traverse sequence
+        (FO.toUnfoldable $ map unAesonEncoder $ gEncodeAeson rec (Proxy :: Proxy list))
     pure $ Aeson
       { patchedJson: AesonPatchedJson (fromObject obj)
       , numberIndex: fold indices
