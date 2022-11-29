@@ -1,122 +1,91 @@
-// parseJsonExtractingIntegers
-//   :: String -> {patchedPayload :: String, numberIndex :: Array String}
-exports.parseJsonExtractingIntegers = str => {
-    const [patchedPayload, numberIndex] = parseJsonExtractingIntegers(str);
-    return {patchedPayload, numberIndex};
-};
+const {BigNumber} = require("bignumber.js")
 
-exports.stringifyAeson_ = numberIndex => originalObject => {
-    const fatal = msg => {
-        throw new Error("Error in stringifyObject: " + msg);
-    };
+const JSONbig = require("@cardanosolutions/json-bigint")({
+    alwaysParseAsBig: true
+})
 
-    let res = '';
+const identity = x => x
+exports.fromBoolean = identity
+exports.fromString = identity
+exports.fromBigNumber = identity
+exports.fromArray = identity
+exports.fromObject = identity
+exports.aesonNull = null
 
-    // Recursively iterate over object fields.
-    // TODO: use a trampoline?
-    const go = object => {
-        if (object === null || typeof object == 'string' || typeof object == 'boolean') {
-            res += JSON.stringify(object);
-        } else if (object instanceof Array) {
-            res += '[';
-            object.forEach((elem, ix) => {
-                go(elem);
-                if (ix != object.length - 1) {
-                    res += ',';
-                }
-            });
-            res += ']';
-        } else if (typeof object == 'object') {
-            res += '{';
-            let keys = [];
-            for (let key in object) {
-                if (object.hasOwnProperty(key)) {
-                    keys.push(key);
-                }
-            };
-            keys.sort(); // for stability of Eq instance
-            keys.forEach((key, ix) => {
-                res += JSON.stringify(key);
-                res += ':';
-                go(object[key]);
-                if (ix != keys.length - 1) {
-                    res += ',';
-                }
-            });
-            res += '}';
-        } else if (typeof object == 'number') {
-            if (object in numberIndex) {
-                res += numberIndex[object];
-            } else {
-                fatal("No such index in numberIndex!");
-            }
-        } else {
-            fatal("Wrong type of object: " + typeof object);
-        }
-    };
+const _caseAeson =
+    caseNull =>
+    caseBoolean =>
+    caseBigNumber =>
+    caseString =>
+    caseArray =>
+    caseObject =>
+    json => {
+        if (json === null)
+            return caseNull(json)
 
-    go(originalObject);
-    return res;
-};
+        if (typeof json === "boolean")
+            return caseBoolean(json)
 
-// NOTE: For a general overview of this function's purpose,
-//       consult module docstring in Aeson.purs
-const parseJsonExtractingIntegers = str => {
-    const s = String(str);
+        if (typeof json === "string")
+            return caseString(json)
 
-    const index = [];
-    let counter = 0;
-    let numberAcc = [];
+        if (BigNumber.isBigNumber(json))
+            return caseBigNumber(json);
 
-    const arr = [];
-    let in_number = false;
-    let in_string = false;
-    let escaped = -1;
+        if (Array.isArray(json))
+            return caseArray(json)
 
-    for (let i = 0, n = s.length; i < n; ++i) {
-        const c = s[i];
-        // set the escape flag
-        if (in_string && escaped!=i){
-            if (c == "\\"){
-                escaped = i+1;
-            }
-        }
-        // set in_string flag
-        if (c == '"' && escaped!=i) {
-            in_string = !in_string;
-        }
-        // set in_number flag and quote numbers
-        if(!in_string){
-            if (c >= '0' && c <= '9' || c == '-') {
-                if (!in_number) {
-                    // push a number index in place of a number
-                    arr.push((counter++).toString());
-                }
-                in_number=true;
-            }
-            // assuming a number can only end with:
-            if (c == ',' || c == '}' || c == ']' || /\s/.test(c)){
-                if (in_number) {
-                    // push the accumulated number string into the
-                    // number index
-                    index.push(numberAcc.join(''));
-                    numberAcc = [];
-                }
-                in_number=false;
-            }
-        }
-        // push char if in string or is not a whitespace
-        if (in_number) {
-            numberAcc.push(c);
-        } else if (in_string || !/\s/.test(c)) {
-            arr.push(c);
-        }
+        if (typeof json === "object")
+            return caseObject(json)
+
+        throw "Imposible happened: JSON object is incorrect: "
+            + json.toString() + " " + typeof json;
     }
+exports._caseAeson = _caseAeson
 
-    // single number case
-    if (in_number) {
-        index.push(numberAcc.join(''));
+// Hack zone.
+// BigNumberFixed is instanceof (same as) BigNumber but
+// redefines toJSON method to ensure no exponential notation
+// in toJSON result, which JSONbig.stringify use internally
+
+class BigNumberFixed extends BigNumber {
+    constructor(bignum) {
+        super(bignum)
     }
+    toJSON() {
+        return this.toFixed()
+    }
+}
 
-    return [arr.join(''), index];
-};
+//---
+
+const traverseFormattingBigInt = _caseAeson
+    // caseNull
+    (identity)
+    // caseBoolean
+    (identity)
+    // caseBigNumber
+    (bn => new BigNumberFixed(bn))
+    // caseString
+    (identity)
+    // caseArray
+    (arr => arr.map(traverseFormattingBigInt))
+    // caseObject
+    (object => {
+        const tmp = {}
+        Object.keys(object).forEach(key =>
+            tmp[key] = traverseFormattingBigInt(object[key]))
+        return tmp
+    })
+
+exports.stringifyAeson = json => JSONbig.stringify(traverseFormattingBigInt(json))
+
+exports.parseAeson = Nothing => Just => jsonStr => {
+    try {
+        return Just(JSONbig.parse(jsonStr))
+    } catch (_) {
+        return Nothing
+    }
+}
+
+

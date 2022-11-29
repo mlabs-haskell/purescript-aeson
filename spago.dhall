@@ -6,11 +6,10 @@ You can edit this file as you like.
 , dependencies =
   [ "aff"
   , "argonaut"
-  , "argonaut-codecs"
-  , "argonaut-core"
   , "arrays"
   , "bifunctors"
   , "bigints"
+  , "bignumber"
   , "const"
   , "control"
   , "effect"

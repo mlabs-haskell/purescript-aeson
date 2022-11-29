@@ -1,0 +1,5 @@
+{
+  "dependencies": {
+    "@cardanosolutions/json-bigint": "^1.0.0"
+  }
+}
