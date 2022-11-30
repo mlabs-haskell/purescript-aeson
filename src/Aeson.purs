@@ -23,13 +23,11 @@ module Aeson
   , Aeson
   , AesonCases
   , AesonEncoder
-  , NumberIndex
   , class EncodeAeson
   , class GEncodeAeson
   , class DecodeAeson
   , class DecodeAesonField
   , class GDecodeAeson
-  , bumpNumberIndexBy
   , caseAeson
   , caseAesonArray
   , caseAesonBigInt
@@ -49,8 +47,6 @@ module Aeson
   , encodeAesonViaJson
   , gDecodeAeson
   , gEncodeAeson
-  , useNextIndexIndex
-  , getCurrentNumberIndex
   , getField
   , getFieldOptional
   , getFieldOptional'
@@ -628,37 +624,42 @@ else instance DecodeAeson a => DecodeAesonField a where
 -------- EncodeAeson --------
 
 class EncodeAeson (a :: Type) where
-  encodeAeson' :: a -> AesonEncoder Aeson
+  encodeAeson' :: a -> AesonEncoder
+
+newtype AesonEncoder = AesonEncoder (AesonEncoderM Aeson)
+
+unAesonEncoder :: AesonEncoder -> AesonEncoderM Aeson
+unAesonEncoder (AesonEncoder a) = a
 
 encodeAeson :: forall a. EncodeAeson a => a -> Aeson
-encodeAeson = runEncoder <<< encodeAeson'
+encodeAeson = runEncoder <<< unAesonEncoder <<< encodeAeson'
 
-runEncoder :: forall a. AesonEncoder a -> a
-runEncoder (AesonEncoder s) = evalState s 0
+runEncoder :: forall a. AesonEncoderM a -> a
+runEncoder (AesonEncoderM s) = evalState s 0
 
-newtype AesonEncoder a = AesonEncoder (State Int a)
+newtype AesonEncoderM a = AesonEncoderM (State Int a)
 
-derive newtype instance Functor AesonEncoder
-derive newtype instance Apply AesonEncoder
-derive newtype instance Applicative AesonEncoder
-derive newtype instance Bind AesonEncoder
-derive newtype instance Monad AesonEncoder
+derive newtype instance Functor AesonEncoderM
+derive newtype instance Apply AesonEncoderM
+derive newtype instance Applicative AesonEncoderM
+derive newtype instance Bind AesonEncoderM
+derive newtype instance Monad AesonEncoderM
 
-useNextIndexIndex :: AesonEncoder Int
-useNextIndexIndex = AesonEncoder (get <* modify_ ((+) 1))
+useNextIndexIndex :: AesonEncoderM Int
+useNextIndexIndex = AesonEncoderM (get <* modify_ ((+) 1))
 
-getCurrentNumberIndex :: AesonEncoder Int
-getCurrentNumberIndex = AesonEncoder get
+getCurrentNumberIndex :: AesonEncoderM Int
+getCurrentNumberIndex = AesonEncoderM get
 
-bumpNumberIndexBy :: Int -> AesonEncoder Unit
-bumpNumberIndexBy i = AesonEncoder (modify_ ((+) i))
+bumpNumberIndexBy :: Int -> AesonEncoderM Unit
+bumpNumberIndexBy i = AesonEncoderM (modify_ ((+) i))
 
-encodeAesonViaJson :: forall a. EncodeJson a => a -> AesonEncoder Aeson
-encodeAesonViaJson v = pure $ Aeson
+encodeAesonViaJson :: forall a. EncodeJson a => a -> AesonEncoder
+encodeAesonViaJson v = AesonEncoder $ pure $ Aeson
   { patchedJson: AesonPatchedJson $ encodeJson v, numberIndex: Seq.empty }
 
 instance EncodeAeson Int where
-  encodeAeson' i = do
+  encodeAeson' i = AesonEncoder do
     ix <- useNextIndexIndex
     pure $ Aeson
       { patchedJson: AesonPatchedJson $ encodeJson ix
@@ -666,7 +667,7 @@ instance EncodeAeson Int where
       }
 
 instance EncodeAeson BigInt where
-  encodeAeson' i = do
+  encodeAeson' i = AesonEncoder do
     ix <- useNextIndexIndex
     pure $ Aeson
       { patchedJson: AesonPatchedJson $ encodeJson ix
@@ -674,7 +675,7 @@ instance EncodeAeson BigInt where
       }
 
 instance EncodeAeson UInt where
-  encodeAeson' i = do
+  encodeAeson' i = AesonEncoder do
     ix <- useNextIndexIndex
     pure $ Aeson
       { patchedJson: AesonPatchedJson $ encodeJson ix
@@ -682,7 +683,7 @@ instance EncodeAeson UInt where
       }
 
 instance EncodeAeson Number where
-  encodeAeson' i = do
+  encodeAeson' i = AesonEncoder do
     ix <- useNextIndexIndex
     pure $ Aeson
       { patchedJson: AesonPatchedJson $ encodeJson ix
@@ -696,7 +697,7 @@ instance EncodeAeson Boolean where
   encodeAeson' = encodeAesonViaJson
 
 instance EncodeAeson Aeson where
-  encodeAeson' (Aeson { patchedJson: AesonPatchedJson json, numberIndex }) = do
+  encodeAeson' (Aeson { patchedJson: AesonPatchedJson json, numberIndex }) = AesonEncoder do
     ix <- getCurrentNumberIndex
     let
       bumpIndices = fix $ \_ -> caseJson encodeUnit encodeBoolean encodeNumber
@@ -709,10 +710,10 @@ instance EncodeAeson Aeson where
       (Aeson { patchedJson: AesonPatchedJson (bumpIndices json), numberIndex })
 
 instance EncodeAeson a => EncodeAeson (Object a) where
-  encodeAeson' input = do
+  encodeAeson' input = AesonEncoder do
     Tuple obj indices <-
       foldr step (Tuple FO.empty Seq.empty) <$>
-      traverse (traverse encodeAeson') (FO.toUnfoldable input)
+      traverse (traverse (unAesonEncoder <<< encodeAeson')) (FO.toUnfoldable input)
     pure $ Aeson
       { patchedJson: AesonPatchedJson (fromObject obj)
       , numberIndex: fold indices
@@ -732,10 +733,10 @@ instance
   , RL.RowToList row list
   ) =>
   EncodeAeson (Record row) where
-  encodeAeson' rec = do
+  encodeAeson' rec = AesonEncoder do
     Tuple obj indices <-
       foldr step (Tuple FO.empty Seq.empty) <$> traverse sequence
-        (FO.toUnfoldable $ gEncodeAeson rec (Proxy :: Proxy list))
+        (FO.toUnfoldable $ map unAesonEncoder $ gEncodeAeson rec (Proxy :: Proxy list))
     pure $ Aeson
       { patchedJson: AesonPatchedJson (fromObject obj)
       , numberIndex: fold indices
@@ -751,22 +752,22 @@ instance
       Tuple (FO.insert k json obj) (Seq.cons numberIndex indices)
 
 instance (EncodeAeson a, EncodeAeson b) => EncodeAeson (Tuple a b) where
-  encodeAeson' (Tuple a b) = encodeTraversable' [ encodeAeson a, encodeAeson b ]
+  encodeAeson' (Tuple a b) = AesonEncoder $ encodeTraversable' [ encodeAeson a, encodeAeson b ]
 
 instance EncodeAeson a => EncodeAeson (Array a) where
-  encodeAeson' = encodeTraversable'
+  encodeAeson' = AesonEncoder <<< encodeTraversable'
 
 instance EncodeAeson a => EncodeAeson (L.List a) where
-  encodeAeson' = encodeTraversable'
+  encodeAeson' = AesonEncoder <<< encodeTraversable'
 
 instance EncodeAeson a => EncodeAeson (LL.List a) where
-  encodeAeson' = encodeTraversable'
+  encodeAeson' = AesonEncoder <<< encodeTraversable'
 
 instance EncodeAeson a => EncodeAeson (Seq a) where
-  encodeAeson' = encodeTraversable'
+  encodeAeson' = AesonEncoder <<< encodeTraversable'
 
 instance EncodeAeson a => EncodeAeson (Maybe a) where
-  encodeAeson' Nothing = pure aesonNull
+  encodeAeson' Nothing = AesonEncoder $ pure aesonNull
   encodeAeson' (Just a) = encodeAeson' a
 
 encodeTraversable
@@ -780,7 +781,7 @@ encodeTraversable'
   :: forall (t :: Type -> Type) (a :: Type)
   .  Traversable t
   => EncodeAeson a
-  => t a -> AesonEncoder Aeson
+  => t a -> AesonEncoderM Aeson
 encodeTraversable' arr = do
     Tuple jsonArr indices <- foldM step (Tuple Seq.empty Seq.empty) arr
     pure $ Aeson
@@ -791,15 +792,15 @@ encodeTraversable' arr = do
     step
       :: Tuple (Seq Json) (Seq (Seq String))
       -> a
-      -> AesonEncoder (Tuple (Seq Json) (Seq (Seq String)))
+      -> AesonEncoderM (Tuple (Seq Json) (Seq (Seq String)))
     step (Tuple arrJson indices) a = do
-      Aeson { patchedJson: AesonPatchedJson json, numberIndex } <- encodeAeson'
+      Aeson { patchedJson: AesonPatchedJson json, numberIndex } <- unAesonEncoder $ encodeAeson'
         a
       pure $ Tuple (Seq.snoc arrJson json) (Seq.snoc indices numberIndex)
 
 class GEncodeAeson (row :: Row Type) (list :: RL.RowList Type) where
   gEncodeAeson
-    :: forall proxy. Record row -> proxy list -> FO.Object (AesonEncoder Aeson)
+    :: forall proxy. Record row -> proxy list -> FO.Object AesonEncoder
 
 instance gEncodeAesonNil :: GEncodeAeson row RL.Nil where
   gEncodeAeson _ _ = FO.empty
