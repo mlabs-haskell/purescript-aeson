@@ -1,7 +1,6 @@
--- | Using json-bigint library to parse JSON storing numbers using
--- | BigNumber from bignumber.js. API and behaviour is intended to be close to
--- | Aeson.
--- | Using hack for stringify, see Aeson.js.
+-- | Uses json-bigint library to parse JSON.
+-- | Stores numbers as `BigNumber` from `bignumber.js`.
+-- | API and behaviour is intended to be close to Aeson.
 
 module Aeson (
   (.:)
@@ -64,33 +63,37 @@ module Aeson (
   , toString
   , toUInt
 
-  -- Do we really want to export this?
-  -- These functions are essentialy dublicates of `encodeAeson`
-  -- , fromArray
-  -- , fromBigInt
-  -- , fromBigNumber
-  -- , fromBoolean
-  -- , fromInt
-  -- , fromNumber
-  -- , fromObject
-  -- , fromString
-  -- , fromUInt
+  , fromArray
+  , fromBigInt
+  , fromBigNumber
+  , fromBoolean
+  , fromInt
+  , fromNumber
+  , fromObject
+  , fromString
+  , fromUInt
+
   , aesonNull
-  , JsonDecodeError(..)
+  , toStringifiedNumbersJson
+  , module DataArgonautReexport
 ) where
 
 import Prelude
 
 import Control.Alt ((<|>))
-import Data.Argonaut (Json, stringify) as Argonaut
-import Data.Array (toUnfoldable, fromFoldable, (!!))
+import Control.Lazy (fix)
+import Data.Argonaut (Json, JsonDecodeError(..))
+import Data.Argonaut (JsonDecodeError(..), printJsonDecodeError) as DataArgonautReexport
+import Data.Argonaut (fromArray, fromObject, jsonNull, stringify) as Argonaut
+import Data.Argonaut.Encode.Encoders (encodeBoolean, encodeString)
+import Data.Array (fromFoldable, toUnfoldable, (!!))
 import Data.Bifunctor (lmap)
 import Data.BigInt (BigInt)
 import Data.BigInt as BigInt
 import Data.BigNumber (BigNumber)
 import Data.BigNumber as BigNumber
 import Data.Either (Either(Right, Left), fromRight, note)
-import Data.Foldable (foldM)
+import Data.Foldable (foldM, intercalate)
 import Data.Int (decimal)
 import Data.Int as Int
 import Data.List as L
@@ -116,25 +119,13 @@ import Untagged.Union (class InOneOf, type (|+|), asOneOf)
 -- | A piece of JSON where all numbers are represented as BigNumber (from bignumber.js)
 foreign import data Aeson :: Type
 
+foreign import aesonEq :: Aeson -> Aeson -> Boolean
+
 instance Eq Aeson where
-  eq a b = stringifyAeson a == stringifyAeson b
+  eq = aesonEq
 
 instance Show Aeson where
   show = stringifyAeson
-
-data JsonDecodeError
-  = TypeMismatch String
-  | AtKey String JsonDecodeError
-  | MissingValue
-  | ParsingError
-
-derive instance Eq JsonDecodeError
-
-instance Show JsonDecodeError where
-  show (TypeMismatch x) = "TypeMismatch " <> x
-  show (AtKey k x) = "AtKey " <> k <> " (" <> show x <> ")"
-  show MissingValue = "MissingValue"
-  show ParsingError = "ParsingError"
 
 class DecodeAeson (a :: Type) where
   decodeAeson :: Aeson -> Either JsonDecodeError a
@@ -148,7 +139,8 @@ foreign import parseAeson
 
 parseJsonStringToAeson :: String -> Either JsonDecodeError Aeson
 parseJsonStringToAeson payload =
-  note ParsingError $ parseAeson Nothing Just payload
+  note (TypeMismatch "JSON String")
+    $ parseAeson Nothing Just payload
 
 -- -------- Stringifying: Aeson -> String
 
@@ -156,10 +148,25 @@ foreign import stringifyAeson :: Aeson -> String
 
 -- -------- Json <-> Aeson --------
 
+-- | Replaces numbers the Aeson's payload with stringified
+-- | numbers
+-- | Given original payload of: `{"a": 10}`
+-- | The result will be an Json object representing: `{"a": "10"}`
+toStringifiedNumbersJson :: Aeson -> Json
+toStringifiedNumbersJson = fix \_ ->
+  caseAeson
+    { caseNull: const Argonaut.jsonNull
+    , caseBoolean: encodeBoolean
+    , caseBigNumber: encodeString <<< BigNumber.toFixed
+    , caseString: encodeString
+    , caseArray: map toStringifiedNumbersJson >>> Argonaut.fromArray
+    , caseObject: map toStringifiedNumbersJson >>> Argonaut.fromObject
+    }
+
 -- | Recodes Argonaut Json to Aeson.
 -- | NOTE. The operation is costly as its stringifies given Json
 -- |       and reparses resulting string as Aeson.
-jsonToAeson :: Argonaut.Json -> Aeson
+jsonToAeson :: Json -> Aeson
 jsonToAeson = Argonaut.stringify >>> decodeJsonString >>> fromRight shouldNotHappen
   where
   -- valid json should always decode without errors
@@ -253,11 +260,16 @@ infix 7 getFieldOptional' as .:?
 -- | If not possible returns JsonDecodeError.
 getNestedAeson :: Aeson -> Array String -> Either JsonDecodeError Aeson
 getNestedAeson aeson keys =
-  note (TypeMismatch "Expected nested object") $
+  note (TypeMismatch typeName) $
      foldM lookup aeson keys
   where
   lookup :: Aeson -> String -> Maybe Aeson
   lookup j lbl = caseAesonObject Nothing (FO.lookup lbl) j
+
+  -- Given list of keys: ["foo", "bar", "baz"]
+  -- Expected error message
+  -- " Expected value of type Record.foo.bar.baz"
+  typeName = "Record." <> intercalate "." keys
 
 -- | Utility abbrevation. See `caseAeson` for an example usage.
 type AesonCases a =
@@ -302,6 +314,12 @@ constAesonCases v =
   c :: forall (b :: Type). b -> a
   c = const v
 
+
+decodeNumber ∷ ∀ a. (String → Maybe a) -> Aeson -> Maybe a
+decodeNumber fromString' =
+    caseAesonBigNumber Nothing $
+      fromString' <<< BigNumber.toFixed
+
 caseAesonObject :: forall (a :: Type). a -> (Object Aeson -> a) -> Aeson -> a
 caseAesonObject def f = caseAeson (constAesonCases def # _ { caseObject = f })
 
@@ -316,15 +334,15 @@ caseAesonBoolean def f = caseAeson (constAesonCases def # _ { caseBoolean = f })
 
 -- | `caseAesonBigNumber` specialized to `Int` (fails if no parse)
 caseAesonInt :: forall (a :: Type). a -> (Int -> a) -> Aeson -> a
-caseAesonInt def f = fromRight def <<< map f <<< decodeAeson
+caseAesonInt def f = maybe def f <<< decodeNumber (Int.fromStringAs decimal)
 
 -- | `caseAesonBigNumber` specialized to `UInt` (fails if no parse)
 caseAesonUInt :: forall (a :: Type). a -> (UInt -> a) -> Aeson -> a
-caseAesonUInt def f = fromRight def <<< map f <<< decodeAeson
+caseAesonUInt def f = maybe def f <<< decodeNumber UInt.fromString
 
 -- | `caseAesonBigNumber` specialized to `BigInt` (fails if no parse)
 caseAesonBigInt :: forall (a :: Type). a -> (BigInt -> a) -> Aeson -> a
-caseAesonBigInt def f = fromRight def <<< map f <<< decodeAeson
+caseAesonBigInt def f = maybe def f <<< decodeNumber BigInt.fromString
 
 -- | `caseAesonNumber` specialized to `BigNumber` (fails if no parse)
 caseAesonBigNumber :: forall (a :: Type). a -> (BigNumber -> a) -> Aeson -> a
@@ -332,17 +350,13 @@ caseAesonBigNumber def f = caseAeson (constAesonCases def # _ { caseBigNumber = 
 
 -- | `caseAesonBigNumber` specialized to `Number` (fails if no parse)
 caseAesonNumber :: forall (a :: Type). a -> (Number -> a) -> Aeson -> a
-caseAesonNumber def f = fromRight def <<< map f <<< decodeAeson
+caseAesonNumber def f = maybe def f <<< decodeNumber Number.fromString
 
 caseAesonNull :: forall (a :: Type). a -> (Unit -> a) -> Aeson -> a
 caseAesonNull def f = caseAeson (constAesonCases def # _ { caseNull = f })
 
-verbAesonType :: forall a b. b -> (a -> b) -> (b -> (a -> b) -> Aeson -> b) -> Aeson -> b
-verbAesonType def f g = g def f
-
 isAesonType :: forall a. (Boolean -> (a -> Boolean) -> Aeson -> Boolean) -> Aeson -> Boolean
-isAesonType = verbAesonType false (const true)
-
+isAesonType cs = cs false (const true)
 
 -- | Check if the provided `Json` is the `null` value
 isNull :: Aeson -> Boolean
@@ -389,9 +403,9 @@ toAesonType
   . (Maybe a -> (a -> Maybe a) -> Aeson -> Maybe a)
   -> Aeson
   -> Maybe a
-toAesonType = verbAesonType Nothing Just
+toAesonType cs = cs Nothing Just
 
--- | Convert `Aeson` to the ``Unit` value if the `Aeson` is the null value
+-- | Convert `Aeson` to the `Unit` value if the `Aeson` is the null value
 toNull :: Aeson -> Maybe Unit
 toNull = toAesonType caseAesonNull
 
@@ -441,39 +455,46 @@ decodeJsonString = parseJsonStringToAeson >=> decodeAeson
 
 -------- DecodeAeson instances --------
 
-decodeNumber ∷ ∀ a. (String → Maybe a) -> String -> Aeson -> Either JsonDecodeError a
-decodeNumber fromString' what =
-    caseAesonBigNumber
-      (Left $ TypeMismatch "Can not parse BigNumber from non-number JSON (part)")
-      \bn -> let strRep = BigNumber.toFixed bn in
-        note (TypeMismatch $ "Can not parse " <> what <> " from BigNumber string representation: " <> strRep) $
-          fromString' strRep
+-- decodeNumber ∷ ∀ a. (String → Maybe a) -> String -> Aeson -> Either JsonDecodeError a
+-- decodeNumber fromString' what =
+--     caseAesonBigNumber (Left err) $
+--       note err <<< fromString' <<< BigNumber.toFixed
+--   where
+--     err = TypeMismatch what
 
 instance DecodeAeson UInt where
-  decodeAeson = decodeNumber UInt.fromString "UInt"
+  decodeAeson = caseAesonUInt
+    (Left $ TypeMismatch "UInt")
+    Right
 
 instance DecodeAeson Int where
-  decodeAeson = decodeNumber Int.fromString "Int"
+  decodeAeson = caseAesonInt
+    (Left $ TypeMismatch "Int")
+    Right
 
 instance DecodeAeson BigInt where
-  decodeAeson = decodeNumber BigInt.fromString "BigInt"
+  decodeAeson = caseAesonBigInt
+    (Left $ TypeMismatch "BigInt")
+    Right
 
 instance DecodeAeson Number where
-  decodeAeson = decodeNumber Number.fromString "Number"
+  decodeAeson = caseAesonNumber
+    (Left $ TypeMismatch "Number")
+    Right
 
 instance DecodeAeson BigNumber where
   decodeAeson = caseAesonBigNumber
-    (Left $ TypeMismatch "Can not parse BigNumber from non-number JSON (part)")
-    (pure <<< identity)
+    (Left $ TypeMismatch "BigNumber")
+    Right
 
 instance DecodeAeson Boolean where
   decodeAeson = caseAesonBoolean
-    (Left $ TypeMismatch "Can not parse Boolean from non-boolean JSON (part)")
+    (Left $ TypeMismatch "Boolean")
     Right
 
 instance DecodeAeson String where
   decodeAeson = caseAesonString
-    (Left $ TypeMismatch "Can not parse String from non-string JSON (part)")
+    (Left $ TypeMismatch "String")
     Right
 
 instance DecodeAeson Aeson where
@@ -481,18 +502,17 @@ instance DecodeAeson Aeson where
 
 instance DecodeAeson a => DecodeAeson (Object a) where
   decodeAeson = caseAesonObject
-    (Left $ TypeMismatch "Can not parse Object from non-object JSON (part)")
+    (Left $ TypeMismatch "Object")
     (traverse decodeAeson)
 
 instance (DecodeAeson a, DecodeAeson b) => DecodeAeson (Tuple a b) where
-  decodeAeson = caseAesonArray
-    (Left $ TypeMismatch "Can not parse Tuple from non-array JSON (part)")
-    \arr ->
+  decodeAeson = caseAesonArray (Left err) \arr ->
       case arr !! 0, arr !! 1, arr !! 2 of
         Just a, Just b, Nothing ->
           Tuple <$> decodeAeson a <*> decodeAeson b
-        _, _, _ ->
-          Left (TypeMismatch "Can not parse Tuple from array with lenght /== 2")
+        _, _, _ -> Left err
+    where
+      err = TypeMismatch "Tuple"
 
 instance
   ( GDecodeAeson row list
@@ -500,7 +520,7 @@ instance
   ) =>
   DecodeAeson (Record row) where
   decodeAeson = caseAesonObject
-    (Left $ TypeMismatch "Can not parse Record from non-object JSON (part)")
+    (Left $ TypeMismatch "Record")
     \object -> gDecodeAeson object (Proxy :: Proxy list)
 
 instance
@@ -515,7 +535,7 @@ instance
 
 instance DecodeAeson a => DecodeAeson (Array a) where
   decodeAeson = caseAesonArray
-    (Left $ TypeMismatch "Can not parse Array from non-array JSON (part)")
+    (Left $ TypeMismatch "Array")
     (traverse decodeAeson)
 
 instance DecodeAeson a => DecodeAeson (L.List a) where
@@ -594,6 +614,18 @@ foreign import fromBigNumber :: BigNumber -> Aeson
 foreign import fromArray :: Array Aeson -> Aeson
 foreign import fromObject :: Object Aeson -> Aeson
 foreign import aesonNull :: Aeson
+
+fromInt ∷ Int → Aeson
+fromInt = encodeAeson
+
+fromUInt ∷ UInt → Aeson
+fromUInt = encodeAeson
+
+fromBigInt ∷ BigInt → Aeson
+fromBigInt = encodeAeson
+
+fromNumber ∷ Number → Aeson
+fromNumber = encodeAeson
 
 class EncodeAeson (a :: Type) where
   encodeAeson :: a -> Aeson
