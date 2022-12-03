@@ -1,4 +1,4 @@
--- | Uses json-bigint library to parse JSON.
+-- | Uses `json-bigint` library to parse JSON.
 -- | Stores numbers as `BigNumber` from `bignumber.js`.
 -- | API and behaviour is intended to be close to Aeson.
 
