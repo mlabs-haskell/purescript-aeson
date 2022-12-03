@@ -455,13 +455,6 @@ decodeJsonString = parseJsonStringToAeson >=> decodeAeson
 
 -------- DecodeAeson instances --------
 
--- decodeNumber ∷ ∀ a. (String → Maybe a) -> String -> Aeson -> Either JsonDecodeError a
--- decodeNumber fromString' what =
---     caseAesonBigNumber (Left err) $
---       note err <<< fromString' <<< BigNumber.toFixed
---   where
---     err = TypeMismatch what
-
 instance DecodeAeson UInt where
   decodeAeson = caseAesonUInt
     (Left $ TypeMismatch "UInt")
