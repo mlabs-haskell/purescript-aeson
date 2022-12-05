@@ -153,7 +153,7 @@ foreign import stringifyAeson :: Aeson -> String
 -- | Given original payload of: `{"a": 10}`
 -- | The result will be an Json object representing: `{"a": "10"}`
 toStringifiedNumbersJson :: Aeson -> Json
-toStringifiedNumbersJson = defer $ \_ -> caseAeson
+toStringifiedNumbersJson = defer \_ -> caseAeson
   { caseNull: const Argonaut.jsonNull
   , caseBoolean: encodeBoolean
   , caseBigNumber: encodeString <<< BigNumber.toFixed
