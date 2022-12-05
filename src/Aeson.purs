@@ -81,7 +81,7 @@ module Aeson (
 import Prelude
 
 import Control.Alt ((<|>))
-import Control.Lazy (fix)
+import Control.Lazy (defer)
 import Data.Argonaut (Json, JsonDecodeError(..))
 import Data.Argonaut (JsonDecodeError(..), printJsonDecodeError) as DataArgonautReexport
 import Data.Argonaut (fromArray, fromObject, jsonNull, stringify) as Argonaut
@@ -153,15 +153,14 @@ foreign import stringifyAeson :: Aeson -> String
 -- | Given original payload of: `{"a": 10}`
 -- | The result will be an Json object representing: `{"a": "10"}`
 toStringifiedNumbersJson :: Aeson -> Json
-toStringifiedNumbersJson = fix \_ ->
-  caseAeson
-    { caseNull: const Argonaut.jsonNull
-    , caseBoolean: encodeBoolean
-    , caseBigNumber: encodeString <<< BigNumber.toFixed
-    , caseString: encodeString
-    , caseArray: map toStringifiedNumbersJson >>> Argonaut.fromArray
-    , caseObject: map toStringifiedNumbersJson >>> Argonaut.fromObject
-    }
+toStringifiedNumbersJson = defer $ \_ -> caseAeson
+  { caseNull: const Argonaut.jsonNull
+  , caseBoolean: encodeBoolean
+  , caseBigNumber: encodeString <<< BigNumber.toFixed
+  , caseString: encodeString
+  , caseArray: Argonaut.fromArray <<< map toStringifiedNumbersJson
+  , caseObject: Argonaut.fromObject <<< map toStringifiedNumbersJson
+  }
 
 -- | Recodes Argonaut Json to Aeson.
 -- | NOTE. The operation is costly as its stringifies given Json
