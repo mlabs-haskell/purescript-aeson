@@ -46,7 +46,7 @@ const _caseAeson =
 exports._caseAeson = _caseAeson
 
 // Hack zone.
-// BigNumberFixed is instanceof (same as) BigNumber but
+// BigNumberFixed is instanceof BigNumber but
 // redefines toJSON method to ensure no exponential notation
 // in toJSON result, which JSONbig.stringify use internally
 
@@ -86,7 +86,7 @@ exports.parseAeson = Nothing => Just => jsonStr => {
 
 // ---
 
-const constant = a => _ => a
+const constant = x => _ => x
 
 // Compare two arrays
 const arrEq = (a, b) =>{
@@ -161,8 +161,8 @@ const typeOf = _caseAeson
     (constant(tObj))
 
 const aesonEq = (a, b) => {
-    // If Aesons are of different "types"
-    // they are not equal
+    // If "constructors" are different
+    // aesons are not equal
     const tOfA = typeOf(a)
     if (tOfA !== typeOf(b))
         return false
