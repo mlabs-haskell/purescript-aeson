@@ -5,8 +5,8 @@ import Prelude
 import Effect (Effect)
 import Effect.Aff (launchAff_)
 import Test.Aeson (suite)
-import Test.Utils as Utils
+import Test.TestM
 
 main :: Effect Unit
 main = do
-  launchAff_ $ Utils.interpret suite
+  launchAff_ $ interpret suite

@@ -2,11 +2,13 @@
 -- | Stores numbers as `BigNumber` from `bignumber.js`.
 -- | API and behaviour is intended to be close to Aeson.
 
-module Aeson (
-  (.:)
+module Aeson
+  ( (.:)
   , (.:?)
   , Aeson
   , AesonCases
+  , Finite
+  , unpackFinite
   , class EncodeAeson
   , class GEncodeAeson
   , class DecodeAeson
@@ -18,6 +20,8 @@ module Aeson (
   , caseAesonBigInt
   , caseAesonBigNumber
   , caseAesonBoolean
+  , caseAesonFiniteBigNumber
+  , caseAesonFiniteNumber
   , caseAesonInt
   , caseAesonNull
   , caseAesonNumber
@@ -63,20 +67,23 @@ module Aeson (
   , toString
   , toUInt
 
+  , finiteNumber
+  , finiteBigNumber
+
+  , aesonNull
   , fromArray
   , fromBigInt
-  , fromBigNumber
+  , fromFiniteBigNumber
   , fromBoolean
   , fromInt
-  , fromNumber
+  , fromFiniteNumber
   , fromObject
   , fromString
   , fromUInt
 
-  , aesonNull
   , toStringifiedNumbersJson
   , module DataArgonautReexport
-) where
+  ) where
 
 import Prelude
 
@@ -90,17 +97,15 @@ import Data.Array (fromFoldable, toUnfoldable, (!!))
 import Data.Bifunctor (lmap)
 import Data.BigInt (BigInt)
 import Data.BigInt as BigInt
-import Data.BigNumber (BigNumber)
+import Data.BigNumber (BigNumber, isInteger)
 import Data.BigNumber as BigNumber
 import Data.Either (Either(Right, Left), fromRight, note)
 import Data.Foldable (foldM, intercalate)
-import Data.Int (decimal)
 import Data.Int as Int
 import Data.List as L
 import Data.List.Lazy as LL
-import Data.Maybe (Maybe(Just, Nothing), maybe)
-import Data.Number (fromString) as Number
-import Data.Number.Format (toString) as Number
+import Data.Maybe (Maybe(..), maybe)
+import Data.Number (isFinite, isNaN) as Number
 import Data.Sequence (Seq)
 import Data.Symbol (class IsSymbol, reflectSymbol)
 import Data.Traversable (traverse)
@@ -110,6 +115,7 @@ import Data.UInt (UInt)
 import Data.UInt as UInt
 import Foreign.Object (Object)
 import Foreign.Object as FO
+import Partial.Unsafe (unsafePartial)
 import Prim.Row as Row
 import Prim.RowList as RL
 import Record as Record
@@ -130,12 +136,34 @@ instance Show Aeson where
 class DecodeAeson (a :: Type) where
   decodeAeson :: Aeson -> Either JsonDecodeError a
 
+---
+
+newtype Finite a = Finite a
+
+derive newtype instance Eq a => Eq (Finite a)
+derive newtype instance Ord a => Ord (Finite a)
+derive newtype instance Show a => Show (Finite a)
+
+finiteNumber :: Number -> Maybe (Finite Number)
+finiteNumber n =
+  if Number.isFinite n && not (Number.isNaN n) then Just (Finite n)
+  else Nothing
+
+finiteBigNumber :: BigNumber -> Maybe (Finite BigNumber)
+finiteBigNumber bn =
+  if BigNumber.isFinite bn && not (BigNumber.isNaN bn) then Just (Finite bn)
+  else Nothing
+
+unpackFinite :: forall a. Finite a -> a
+unpackFinite (Finite a) = a
+
 -------- Parsing: String -> Aeson --------
 
 foreign import parseAeson
   :: (forall a. Maybe a)
   -> (forall a. a -> Maybe a)
-  -> String -> Maybe Aeson
+  -> String
+  -> Maybe Aeson
 
 parseJsonStringToAeson :: String -> Either JsonDecodeError Aeson
 parseJsonStringToAeson payload =
@@ -156,7 +184,7 @@ toStringifiedNumbersJson :: Aeson -> Json
 toStringifiedNumbersJson = defer \_ -> caseAeson
   { caseNull: const Argonaut.jsonNull
   , caseBoolean: encodeBoolean
-  , caseBigNumber: encodeString <<< BigNumber.toFixed
+  , caseFiniteBigNumber: encodeString <<< BigNumber.toString <<< unpackFinite
   , caseString: encodeString
   , caseArray: Argonaut.fromArray <<< map toStringifiedNumbersJson
   , caseObject: Argonaut.fromObject <<< map toStringifiedNumbersJson
@@ -166,11 +194,12 @@ toStringifiedNumbersJson = defer \_ -> caseAeson
 -- | NOTE. The operation is costly as its stringifies given Json
 -- |       and reparses resulting string as Aeson.
 jsonToAeson :: Json -> Aeson
-jsonToAeson = Argonaut.stringify >>> decodeJsonString >>> fromRight shouldNotHappen
+jsonToAeson = unsafePartial alwaysRight <<< decodeJsonString <<< Argonaut.stringify
   where
   -- valid json should always decode without errors
   -- error "Impossible happened: valid json should always decode without errors"
-  shouldNotHappen = undefined
+  alwaysRight :: Partial => _
+  alwaysRight (Right x) = x
 
 -------- Aeson manipulation and field accessors --------
 
@@ -260,7 +289,7 @@ infix 7 getFieldOptional' as .:?
 getNestedAeson :: Aeson -> Array String -> Either JsonDecodeError Aeson
 getNestedAeson aeson keys =
   note (TypeMismatch typeName) $
-     foldM lookup aeson keys
+    foldM lookup aeson keys
   where
   lookup :: Aeson -> String -> Maybe Aeson
   lookup j lbl = caseAesonObject Nothing (FO.lookup lbl) j
@@ -274,7 +303,7 @@ getNestedAeson aeson keys =
 type AesonCases a =
   { caseNull :: Unit -> a
   , caseBoolean :: Boolean -> a
-  , caseBigNumber :: BigNumber -> a
+  , caseFiniteBigNumber :: Finite BigNumber -> a
   , caseString :: String -> a
   , caseArray :: Array Aeson -> a
   , caseObject :: Object Aeson -> a
@@ -284,11 +313,12 @@ foreign import _caseAeson
   :: forall a
    . (Unit -> a)
   -> (Boolean -> a)
-  -> (BigNumber -> a)
+  -> (Finite BigNumber -> a)
   -> (String -> a)
   -> (Array Aeson -> a)
   -> (Object Aeson -> a)
-  -> Aeson -> a
+  -> Aeson
+  -> a
 
 caseAeson
   :: forall (a :: Type)
@@ -296,9 +326,9 @@ caseAeson
   -> Aeson
   -> a
 caseAeson
-  { caseNull, caseBoolean, caseBigNumber, caseString, caseArray, caseObject }
+  { caseNull, caseBoolean, caseFiniteBigNumber, caseString, caseArray, caseObject }
   (aeson) =
-    _caseAeson caseNull caseBoolean caseBigNumber caseString caseArray caseObject aeson
+  _caseAeson caseNull caseBoolean caseFiniteBigNumber caseString caseArray caseObject aeson
 
 constAesonCases :: forall (a :: Type). a -> AesonCases a
 constAesonCases v =
@@ -306,18 +336,12 @@ constAesonCases v =
   , caseNull: c
   , caseBoolean: c
   , caseString: c
-  , caseBigNumber: c
+  , caseFiniteBigNumber: c
   , caseArray: c
   }
   where
   c :: forall (b :: Type). b -> a
   c = const v
-
-
-decodeNumber ∷ ∀ a. (String → Maybe a) -> Aeson -> Maybe a
-decodeNumber fromString' =
-    caseAesonBigNumber Nothing $
-      fromString' <<< BigNumber.toFixed
 
 caseAesonObject :: forall (a :: Type). a -> (Object Aeson -> a) -> Aeson -> a
 caseAesonObject def f = caseAeson (constAesonCases def # _ { caseObject = f })
@@ -333,28 +357,55 @@ caseAesonBoolean def f = caseAeson (constAesonCases def # _ { caseBoolean = f })
 
 -- | `caseAesonBigNumber` specialized to `Int` (fails if no parse)
 caseAesonInt :: forall (a :: Type). a -> (Int -> a) -> Aeson -> a
-caseAesonInt def f = maybe def f <<< decodeNumber (Int.fromStringAs decimal)
+caseAesonInt def f = maybe def f <<< caseAesonBigNumber Nothing \bn ->
+  -- While in Int.toNumber doc claims that only integers withing Int bounds
+  -- result in Just _, this is not particularly true.
+  -- The reason is, that JS has no notion of integers, and all numbers are
+  -- stored as IEEE 754 64-bit floats.
+  -- Thus 1.0 and 1.0000000000000001 are indistiguishable in this level
+  -- and Int.fromFiniteNumber happily parse both as Just 1
+  -- BigNumber.isInteger has better precision, and helps us to separate cases here.
+  if isInteger bn then (Int.fromNumber $ BigNumber.toNumber bn) else Nothing
 
 -- | `caseAesonBigNumber` specialized to `UInt` (fails if no parse)
 caseAesonUInt :: forall (a :: Type). a -> (UInt -> a) -> Aeson -> a
-caseAesonUInt def f = maybe def f <<< decodeNumber UInt.fromString
+caseAesonUInt def f = maybe def f <<< caseAesonBigNumber Nothing \bn ->
+  if isInteger bn then (UInt.fromNumber' $ BigNumber.toNumber bn) else Nothing
 
 -- | `caseAesonBigNumber` specialized to `BigInt` (fails if no parse)
 caseAesonBigInt :: forall (a :: Type). a -> (BigInt -> a) -> Aeson -> a
-caseAesonBigInt def f = maybe def f <<< decodeNumber BigInt.fromString
+caseAesonBigInt def f =
+  -- BigNumber.toFixed is be VERY expensive operation for big exponents, as it unwraps
+  -- scientific notation to decimal. So, somethig like 1e100 unwraps in 100 zeroes
+  -- leading by one. Avoid, if you expect big exponents in your JSON.
+  maybe def f <<< (caseAesonBigNumber Nothing $ \bn ->
+    if BigNumber.isInteger bn then BigInt.fromString $ BigNumber.toFixed bn
+    else Nothing)
 
--- | `caseAesonNumber` specialized to `BigNumber` (fails if no parse)
+-- | The reson we return `Finite BigNumber` instead plain `BigNumber`
+-- | is to simplify things like `caseAesonBigNumber _ fromFiniteBigNumber`
+-- | Parser guarantees that all numbers we get from it are finite and not NaN
+caseAesonFiniteBigNumber :: forall (a :: Type). a -> (Finite BigNumber -> a) -> Aeson -> a
+caseAesonFiniteBigNumber def f = caseAeson
+  (constAesonCases def # _ { caseFiniteBigNumber = f })
+
 caseAesonBigNumber :: forall (a :: Type). a -> (BigNumber -> a) -> Aeson -> a
-caseAesonBigNumber def f = caseAeson (constAesonCases def # _ { caseBigNumber = f })
+caseAesonBigNumber def f = caseAesonFiniteBigNumber def (f <<< unpackFinite)
 
--- | `caseAesonBigNumber` specialized to `Number` (fails if no parse)
+-- | `caseAesonFiniteNumber` specialized to `Finite Number` (fails if no parse)
+caseAesonFiniteNumber :: forall (a :: Type). a -> (Finite Number -> a) -> Aeson -> a
+caseAesonFiniteNumber def f = caseAesonBigNumber def
+    (maybe def f <<< finiteNumber <<< BigNumber.toNumber)
+
+-- | `caseAesonNumber` specialized to `Number` (fails if no parse)
 caseAesonNumber :: forall (a :: Type). a -> (Number -> a) -> Aeson -> a
-caseAesonNumber def f = maybe def f <<< decodeNumber Number.fromString
+caseAesonNumber def f = caseAesonFiniteNumber def (f <<< unpackFinite)
 
 caseAesonNull :: forall (a :: Type). a -> (Unit -> a) -> Aeson -> a
 caseAesonNull def f = caseAeson (constAesonCases def # _ { caseNull = f })
 
-isAesonType :: forall a. (Boolean -> (a -> Boolean) -> Aeson -> Boolean) -> Aeson -> Boolean
+isAesonType
+  :: forall a. (Boolean -> (a -> Boolean) -> Aeson -> Boolean) -> Aeson -> Boolean
 isAesonType cs = cs false (const true)
 
 -- | Check if the provided `Json` is the `null` value
@@ -399,7 +450,7 @@ isObject = isAesonType caseAesonObject
 
 toAesonType
   :: forall a
-  . (Maybe a -> (a -> Maybe a) -> Aeson -> Maybe a)
+   . (Maybe a -> (a -> Maybe a) -> Aeson -> Maybe a)
   -> Aeson
   -> Maybe a
 toAesonType cs = cs Nothing Just
@@ -499,12 +550,12 @@ instance DecodeAeson a => DecodeAeson (Object a) where
 
 instance (DecodeAeson a, DecodeAeson b) => DecodeAeson (Tuple a b) where
   decodeAeson = caseAesonArray (Left err) \arr ->
-      case arr !! 0, arr !! 1, arr !! 2 of
-        Just a, Just b, Nothing ->
-          Tuple <$> decodeAeson a <*> decodeAeson b
-        _, _, _ -> Left err
+    case arr !! 0, arr !! 1, arr !! 2 of
+      Just a, Just b, Nothing ->
+        Tuple <$> decodeAeson a <*> decodeAeson b
+      _, _, _ -> Left err
     where
-      err = TypeMismatch "Tuple"
+    err = TypeMismatch "Tuple"
 
 instance
   ( GDecodeAeson row list
@@ -542,14 +593,17 @@ instance DecodeAeson a => DecodeAeson (Seq a) where
 instance DecodeAeson a => DecodeAeson (Maybe a) where
   decodeAeson aeson =
     caseAeson
-    { caseNull: \_ -> Right Nothing
-    , caseBoolean: \_ -> Just <$> decodeAeson aeson
-    , caseBigNumber: \_ -> Just <$> decodeAeson aeson
-    , caseString: \_ -> Just <$> decodeAeson aeson
-    , caseArray: \_ -> Just <$> decodeAeson aeson
-    , caseObject: \_ -> Just <$> decodeAeson aeson
-    }
-    aeson
+      { caseNull: const $ Right Nothing
+      , caseBoolean: mdecode
+      , caseFiniteBigNumber: mdecode
+      , caseString: mdecode
+      , caseArray: mdecode
+      , caseObject: mdecode
+      }
+      aeson
+    where
+    mdecode :: forall x foo. DecodeAeson x => foo -> Either _ (Maybe x)
+    mdecode _ = Just <$> decodeAeson aeson
 
 class
   GDecodeAeson (row :: Row Type) (list :: RL.RowList Type)
@@ -602,49 +656,45 @@ else instance DecodeAeson a => DecodeAesonField a where
 foreign import fromBoolean :: Boolean -> Aeson
 -- | This function does NOT convert the `String` encoding of a JSON value to `Json`
 foreign import fromString :: String -> Aeson
-foreign import fromBigNumber :: BigNumber -> Aeson
+foreign import fromFiniteBigNumber :: Finite BigNumber -> Aeson
 foreign import fromArray :: Array Aeson -> Aeson
 foreign import fromObject :: Object Aeson -> Aeson
 foreign import aesonNull :: Aeson
 
 fromInt ∷ Int → Aeson
-fromInt = encodeAeson
+fromInt = fromFiniteBigNumber <<< Finite <<< BigNumber.fromInt
 
 fromUInt ∷ UInt → Aeson
-fromUInt = encodeAeson
+fromUInt = fromFiniteBigNumber <<< Finite <<< BigNumber.fromUInt
 
 fromBigInt ∷ BigInt → Aeson
-fromBigInt = encodeAeson
+fromBigInt =
+  -- bigNumberToString should never fail on strings obtained by stringifying of a BigInt
+  -- thus `fromRight undefined` is safe here
+  fromRight undefined <<< map (encodeAeson <<< Finite)
+    <<< BigNumber.parseBigNumber
+    <<< BigInt.toString
 
-fromNumber ∷ Number → Aeson
-fromNumber = encodeAeson
+fromFiniteNumber ∷ Finite Number → Aeson
+fromFiniteNumber (Finite n) = fromFiniteBigNumber $ Finite $ BigNumber.fromNumber n
 
 class EncodeAeson (a :: Type) where
   encodeAeson :: a -> Aeson
 
 instance EncodeAeson Int where
-  -- bigNumberToString should never fail on strings obtained by stringifying of an Int
-  -- thus `fromRight undefined` is safe here
-  encodeAeson = fromRight undefined <<< map encodeAeson
-    <<< BigNumber.parseBigNumber <<< Int.toStringAs decimal
+  encodeAeson = fromInt
 
 instance EncodeAeson BigInt where
-  -- bigNumberToString should never fail on strings obtained by stringifying of a BigInt
-  -- thus `fromRight undefined` is safe here
-  encodeAeson = fromRight undefined <<< map encodeAeson
-    <<< BigNumber.parseBigNumber <<< BigInt.toString
+  encodeAeson = fromBigInt
 
 instance EncodeAeson UInt where
-  encodeAeson = encodeAeson <<< UInt.toInt
+  encodeAeson = fromUInt
 
-instance EncodeAeson Number where
-  -- bigNumberToString should never fail on strings obtained by stringifying of a Number
-  -- thus `fromRight undefined` is safe here
-  encodeAeson = fromRight undefined <<< map encodeAeson
-    <<< BigNumber.parseBigNumber <<< Number.toString
+instance EncodeAeson (Finite Number) where
+  encodeAeson = fromFiniteNumber
 
-instance EncodeAeson BigNumber where
-  encodeAeson = fromBigNumber
+instance EncodeAeson (Finite BigNumber) where
+  encodeAeson = fromFiniteBigNumber
 
 instance EncodeAeson String where
   encodeAeson = fromString
@@ -666,7 +716,7 @@ instance
   encodeAeson rec = encodeAeson $ gEncodeAeson rec (Proxy :: Proxy list)
 
 instance EncodeAeson a => EncodeAeson (Array a) where
-  encodeAeson x = fromArray $ map encodeAeson x
+  encodeAeson = fromArray <<< map encodeAeson
 
 instance (EncodeAeson a, EncodeAeson b) => EncodeAeson (Tuple a b) where
   -- We represent tuple as 2-element JS array

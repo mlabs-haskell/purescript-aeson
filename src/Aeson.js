@@ -1,6 +1,6 @@
 const {BigNumber} = require("bignumber.js")
 
-const JSONbig = require("@cardanosolutions/json-bigint")({
+const JSONbig = require("json-bigint")({
     alwaysParseAsBig: true
 })
 
@@ -9,7 +9,7 @@ const JSONbig = require("@cardanosolutions/json-bigint")({
 const identity = x => x
 exports.fromBoolean = identity
 exports.fromString = identity
-exports.fromBigNumber = identity
+exports.fromFiniteBigNumber = identity
 exports.fromArray = identity
 exports.fromObject = identity
 exports.aesonNull = null
@@ -74,7 +74,7 @@ const traverseFormattingBigInt = _caseAeson
         return tmp
     })
 
-exports.stringifyAeson = json => JSONbig.stringify(traverseFormattingBigInt(json))
+exports.stringifyAeson = json => JSONbig.stringify(json)
 
 exports.parseAeson = Nothing => Just => jsonStr => {
     try {

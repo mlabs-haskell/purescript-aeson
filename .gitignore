@@ -13,3 +13,4 @@ result-*
 .projectile
 .idea
 node_modules
+.vscode
