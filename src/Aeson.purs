@@ -604,6 +604,9 @@ else instance
         <*> lmap (AtIndex $ ixCounter + 1) (decodeAeson b)
 
 instance (DecodeTupleAux (Tuple a b)) => DecodeAeson (Tuple a b) where
+  -- Decodes nested tuple of arbitrary size, (like Boolean /\ Boolean /\ Boolean /\ ...)
+  -- from flat JSON array (like [true, true, true, ...])
+  -- Fails is lengths of tuple and array are different
   decodeAeson aeson = flip (caseAesonArray $ Left $ TypeMismatch $ "Tuple") aeson \arr ->
     if length arr /= len then err else tupleFromArray 0 arr
     where
@@ -792,6 +795,8 @@ else instance
   tupleToArray (Tuple a b) = [ encodeAeson a, encodeAeson b ]
 
 instance EncodeTupleAux (Tuple a b) => EncodeAeson (Tuple a b) where
+  -- Encodes nested tuple of arbitrary size, (like Boolean /\ Boolean /\ Boolean /\ ...)
+  -- to flat JSON array (like [true, true, true, ...])
   encodeAeson = encodeAeson <<< tupleToArray
 
 ---
