@@ -56,6 +56,9 @@ module Aeson
   , isString
   , isUInt
 
+  , partialFiniteNumber
+  , partialFiniteBigNumber
+
   , toArray
   , toBigInt
   , toBigNumber
@@ -88,10 +91,10 @@ module Aeson
 import Prelude
 
 import Control.Alt ((<|>))
-import Control.Lazy (defer)
-import Data.Argonaut (Json, JsonDecodeError(..))
+import Control.Lazy (defer, fix)
+import Data.Argonaut (Json, JsonDecodeError(..), caseJson)
 import Data.Argonaut (JsonDecodeError(..), printJsonDecodeError) as DataArgonautReexport
-import Data.Argonaut (fromArray, fromObject, jsonNull, stringify) as Argonaut
+import Data.Argonaut (fromArray, fromObject, jsonNull) as Argonaut
 import Data.Argonaut.Encode.Encoders (encodeBoolean, encodeString)
 import Data.Array (fromFoldable, toUnfoldable, (!!))
 import Data.Bifunctor (lmap)
@@ -104,7 +107,7 @@ import Data.Foldable (foldM, intercalate)
 import Data.Int as Int
 import Data.List as L
 import Data.List.Lazy as LL
-import Data.Maybe (Maybe(..), maybe)
+import Data.Maybe (Maybe(..), fromJust, maybe)
 import Data.Number (isFinite, isNaN) as Number
 import Data.Sequence (Seq)
 import Data.Symbol (class IsSymbol, reflectSymbol)
@@ -144,15 +147,27 @@ derive newtype instance Eq a => Eq (Finite a)
 derive newtype instance Ord a => Ord (Finite a)
 derive newtype instance Show a => Show (Finite a)
 
+-- | Returns `Nothing` if input is Infinity or NaN
 finiteNumber :: Number -> Maybe (Finite Number)
 finiteNumber n =
   if Number.isFinite n && not (Number.isNaN n) then Just (Finite n)
   else Nothing
 
+-- | Same as finiteNumber, but partial. Unsafely unpacks Maybe.
+-- | It is just handy to have it.
+partialFiniteNumber :: Partial => Number -> Finite Number
+partialFiniteNumber = fromJust <<< finiteNumber
+
+-- | Returns `Nothing` if input is Infinity or NaN
 finiteBigNumber :: BigNumber -> Maybe (Finite BigNumber)
 finiteBigNumber bn =
   if BigNumber.isFinite bn && not (BigNumber.isNaN bn) then Just (Finite bn)
   else Nothing
+
+-- | Same as finiteBigNumber, but partial. Unsafely unpacks Maybe.
+-- | It is just handy to have it.
+partialFiniteBigNumber :: Partial => BigNumber -> Finite BigNumber
+partialFiniteBigNumber = fromJust <<< finiteBigNumber
 
 unpackFinite :: forall a. Finite a -> a
 unpackFinite (Finite a) = a
@@ -191,15 +206,16 @@ toStringifiedNumbersJson = defer \_ -> caseAeson
   }
 
 -- | Recodes Argonaut Json to Aeson.
--- | NOTE. The operation is costly as its stringifies given Json
--- |       and reparses resulting string as Aeson.
 jsonToAeson :: Json -> Aeson
-jsonToAeson = unsafePartial alwaysRight <<< decodeJsonString <<< Argonaut.stringify
-  where
-  -- valid json should always decode without errors
-  -- error "Impossible happened: valid json should always decode without errors"
-  alwaysRight :: Partial => _
-  alwaysRight (Right x) = x
+jsonToAeson = fix \self -> caseJson
+  (const aesonNull)
+  (fromBoolean)
+  -- Valid json can not contain Infinity on NaN, thus
+  -- assume BigNumber.fromNumber always finite here
+  (unsafePartial fromJust <<< map fromFiniteNumber <<< finiteNumber)
+  (fromString)
+  (fromArray <<< map self)
+  (fromObject <<< map self)
 
 -------- Aeson manipulation and field accessors --------
 
@@ -378,9 +394,11 @@ caseAesonBigInt def f =
   -- BigNumber.toFixed is be VERY expensive operation for big exponents, as it unwraps
   -- scientific notation to decimal. So, somethig like 1e100 unwraps in 100 zeroes
   -- leading by one. Avoid, if you expect big exponents in your JSON.
-  maybe def f <<< (caseAesonBigNumber Nothing $ \bn ->
-    if BigNumber.isInteger bn then BigInt.fromString $ BigNumber.toFixed bn
-    else Nothing)
+  maybe def f <<<
+    ( caseAesonBigNumber Nothing $ \bn ->
+        if BigNumber.isInteger bn then BigInt.fromString $ BigNumber.toFixed bn
+        else Nothing
+    )
 
 -- | The reson we return `Finite BigNumber` instead plain `BigNumber`
 -- | is to simplify things like `caseAesonBigNumber _ fromFiniteBigNumber`
@@ -395,7 +413,7 @@ caseAesonBigNumber def f = caseAesonFiniteBigNumber def (f <<< unpackFinite)
 -- | `caseAesonFiniteNumber` specialized to `Finite Number` (fails if no parse)
 caseAesonFiniteNumber :: forall (a :: Type). a -> (Finite Number -> a) -> Aeson -> a
 caseAesonFiniteNumber def f = caseAesonBigNumber def
-    (maybe def f <<< finiteNumber <<< BigNumber.toNumber)
+  (maybe def f <<< finiteNumber <<< BigNumber.toNumber)
 
 -- | `caseAesonNumber` specialized to `Number` (fails if no parse)
 caseAesonNumber :: forall (a :: Type). a -> (Number -> a) -> Aeson -> a

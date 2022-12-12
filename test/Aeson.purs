@@ -2,9 +2,66 @@ module Test.Aeson where
 
 import Prelude
 
-import Aeson (Aeson, JsonDecodeError(..), aesonNull, caseAesonArray, caseAesonBigInt, caseAesonBigNumber, caseAesonBoolean, caseAesonFiniteBigNumber, caseAesonFiniteNumber, caseAesonInt, caseAesonNull, caseAesonObject, caseAesonString, caseAesonUInt, decodeAeson, decodeJsonString, encodeAeson, finiteBigNumber, finiteNumber, fromArray, fromBigInt, fromBoolean, fromFiniteBigNumber, fromFiniteNumber, fromInt, fromObject, fromString, fromUInt, getField, getFieldOptional, getFieldOptional', getNestedAeson, isArray, isBigInt, isBigNumber, isBoolean, isInt, isNull, isNumber, isObject, isString, isUInt, jsonToAeson, parseJsonStringToAeson, stringifyAeson, toArray, toBigInt, toBigNumber, toBoolean, toInt, toNull, toNumber, toObject, toString, toStringifiedNumbersJson, toUInt, unpackFinite)
+import Aeson
+  ( Aeson
+  , JsonDecodeError(..)
+  , aesonNull
+  , caseAesonArray
+  , caseAesonBigInt
+  , caseAesonBigNumber
+  , caseAesonBoolean
+  , caseAesonFiniteBigNumber
+  , caseAesonFiniteNumber
+  , caseAesonInt
+  , caseAesonNull
+  , caseAesonObject
+  , caseAesonString
+  , caseAesonUInt
+  , decodeAeson
+  , decodeJsonString
+  , encodeAeson
+  , finiteBigNumber
+  , fromArray
+  , fromBigInt
+  , fromBoolean
+  , fromFiniteBigNumber
+  , fromInt
+  , fromObject
+  , fromString
+  , fromUInt
+  , getField
+  , getFieldOptional
+  , getFieldOptional'
+  , getNestedAeson
+  , isArray
+  , isBigInt
+  , isBigNumber
+  , isBoolean
+  , isInt
+  , isNull
+  , isNumber
+  , isObject
+  , isString
+  , isUInt
+  , jsonToAeson
+  , parseJsonStringToAeson
+  , stringifyAeson
+  , toArray
+  , toBigInt
+  , toBigNumber
+  , toBoolean
+  , toInt
+  , toNull
+  , toNumber
+  , toObject
+  , toString
+  , toStringifiedNumbersJson
+  , toUInt
+  , unpackFinite
+  )
 import Control.Lazy (fix)
 import Data.Argonaut (Json, caseJson)
+import Data.Argonaut as Argonaut
 import Data.BigNumber as BigNumber
 import Data.BooleanAlgebra (implies)
 import Data.Either (Either(..), fromRight, hush, isLeft)
@@ -16,7 +73,19 @@ import Data.Typelevel.Undefined (undefined)
 import Data.UInt as UInt
 import Mote (test)
 import Partial.Unsafe (unsafePartial)
-import Test.Gen (aesonArrayGen, aesonBigNumberGen, aesonGen, aesonNullGen, aesonObjectGen, aesonStringGen, bigNumberStrGen, defaultNumberGenConf, finiteBigNumberGen, jsonGen, oneOf)
+import Test.Gen
+  ( aesonArrayGen
+  , aesonBigNumberGen
+  , aesonGen
+  , aesonNullGen
+  , aesonObjectGen
+  , aesonStringGen
+  , bigNumberStrGen
+  , defaultNumberGenConf
+  , finiteBigNumberGen
+  , jsonGen
+  , oneOf
+  )
 import Test.QuickCheck (arbitrary, quickCheckGen')
 import Test.Spec.Assertions (shouldEqual)
 import Test.TestM (TestPlanM)
@@ -75,10 +144,11 @@ suite = do
   -- "X encoding/decoding and functions coherence" test family
   -- checks that functions like isX, toX, caseAesonX are coherent
   -- and (caseAesonX _ fromX) is id
-  test "Null encoding/decoding and functions coherence" $
-    assertTrue_ $ isNull aesonNull
-      && isJust (toNull aesonNull)
-      && caseAesonNull Nothing (Just <<< const aesonNull) aesonNull == Just aesonNull
+  test "Null encoding/decoding and functions coherence"
+    $ assertTrue_
+    $ isNull aesonNull
+        && isJust (toNull aesonNull)
+        && caseAesonNull Nothing (Just <<< const aesonNull) aesonNull == Just aesonNull
 
   test "Boolean encoding/decoding and functions coherence" do
     let
@@ -261,15 +331,13 @@ suite = do
         -- if both implementations match, they are,
         -- probably, fine
         yetAnotherJsonToAeson :: Json -> Aeson
-        yetAnotherJsonToAeson = fix \self -> caseJson
-          (const aesonNull)
-          (fromBoolean)
-          -- Valid json can not contain Infinity on NaN, thus
-          -- assume BigNumber.fromNumber always finite here
-          (unsafePartial fromJust <<< map fromFiniteNumber <<< finiteNumber)
-          (fromString)
-          (fromArray <<< map self)
-          (fromObject <<< map self)
+        yetAnotherJsonToAeson =
+          unsafePartial alwaysRight <<< decodeJsonString <<< Argonaut.stringify
+          where
+          -- valid json should always decode without errors
+          -- error "Impossible happened: valid json should always decode without errors"
+          alwaysRight :: Partial => _
+          alwaysRight (Right x) = x
 
       pure $ jsonToAeson json == yetAnotherJsonToAeson json
 

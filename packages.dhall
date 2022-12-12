@@ -199,4 +199,4 @@ let additions =
         }
       }
 
-in  (upstream // additions)
+in upstream // additions
