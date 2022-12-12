@@ -1,8 +1,6 @@
 const {BigNumber} = require("bignumber.js")
 
-const JSONbig = require("json-bigint")({
-    alwaysParseAsBig: true
-})
+const JSONbig = require("@khavryliuk/json-bigint")({})
 
 //---
 
