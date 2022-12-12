@@ -5,6 +5,7 @@
 module Aeson
   ( (.:)
   , (.:?)
+  , (.:!)
   , Aeson
   , AesonCases
   , Finite
@@ -86,6 +87,11 @@ module Aeson
 
   , toStringifiedNumbersJson
   , module DataArgonautReexport
+  , class EncodeTupleAux
+  , tupleToArray
+  , class DecodeTupleAux
+  , tupleFromArray
+  , tupleLength
   ) where
 
 import Prelude
@@ -96,7 +102,7 @@ import Data.Argonaut (Json, JsonDecodeError(..), caseJson)
 import Data.Argonaut (JsonDecodeError(..), printJsonDecodeError) as DataArgonautReexport
 import Data.Argonaut (fromArray, fromObject, jsonNull) as Argonaut
 import Data.Argonaut.Encode.Encoders (encodeBoolean, encodeString)
-import Data.Array (fromFoldable, toUnfoldable, (!!))
+import Data.Array (cons, fromFoldable, head, length, tail, toUnfoldable, (!!))
 import Data.Bifunctor (lmap)
 import Data.BigInt (BigInt)
 import Data.BigInt as BigInt
@@ -566,14 +572,45 @@ instance DecodeAeson a => DecodeAeson (Object a) where
     (Left $ TypeMismatch "Object")
     (traverse decodeAeson)
 
-instance (DecodeAeson a, DecodeAeson b) => DecodeAeson (Tuple a b) where
-  decodeAeson = caseAesonArray (Left err) \arr ->
+---
+
+class DecodeTupleAux a where
+  tupleFromArray :: Int -> Array Aeson -> Either JsonDecodeError a
+  tupleLength :: Proxy a -> Int
+
+instance
+  ( DecodeAeson a
+  , DecodeTupleAux (Tuple b c)
+  ) =>
+  DecodeTupleAux (Tuple a (Tuple b c)) where
+  tupleLength _ = 1 + tupleLength (Proxy :: Proxy (Tuple b c))
+  tupleFromArray ixCounter arr = unsafePartial $
+    -- Partial is safe here, lenth has been matched in-advance
+    case head arr, tail arr of
+      Just h, Just t -> Tuple
+        <$> lmap (AtIndex ixCounter) (decodeAeson h)
+        <*> tupleFromArray (ixCounter + 1) t
+
+else instance
+  ( DecodeAeson a
+  , DecodeAeson b
+  ) =>
+  DecodeTupleAux (Tuple a b) where
+  tupleLength _ = 2
+  tupleFromArray ixCounter arr = unsafePartial $
     case arr !! 0, arr !! 1, arr !! 2 of
-      Just a, Just b, Nothing ->
-        Tuple <$> decodeAeson a <*> decodeAeson b
-      _, _, _ -> Left err
+      Just a, Just b, Nothing -> Tuple
+        <$> lmap (AtIndex $ ixCounter + 0) (decodeAeson a)
+        <*> lmap (AtIndex $ ixCounter + 1) (decodeAeson b)
+
+instance (DecodeTupleAux (Tuple a b)) => DecodeAeson (Tuple a b) where
+  decodeAeson aeson = flip (caseAesonArray $ Left $ TypeMismatch $ "Tuple") aeson \arr ->
+    if length arr /= len then err else tupleFromArray 0 arr
     where
-    err = TypeMismatch "Tuple"
+    len = tupleLength (Proxy :: Proxy (Tuple a b))
+    err = Left $ TypeMismatch $ "Tuple" <> show len
+
+---
 
 instance
   ( GDecodeAeson row list
@@ -736,9 +773,28 @@ instance
 instance EncodeAeson a => EncodeAeson (Array a) where
   encodeAeson = fromArray <<< map encodeAeson
 
-instance (EncodeAeson a, EncodeAeson b) => EncodeAeson (Tuple a b) where
-  -- We represent tuple as 2-element JS array
-  encodeAeson (Tuple a b) = encodeAeson [ encodeAeson a, encodeAeson b ]
+---
+
+class EncodeTupleAux a where
+  tupleToArray :: a -> Array Aeson
+
+instance
+  ( EncodeAeson a
+  , EncodeTupleAux (Tuple b c)
+  ) =>
+  EncodeTupleAux (Tuple a (Tuple b c)) where
+  tupleToArray (Tuple a bc) = cons (encodeAeson a) $ tupleToArray bc
+else instance
+  ( EncodeAeson a
+  , EncodeAeson b
+  ) =>
+  EncodeTupleAux (Tuple a b) where
+  tupleToArray (Tuple a b) = [ encodeAeson a, encodeAeson b ]
+
+instance EncodeTupleAux (Tuple a b) => EncodeAeson (Tuple a b) where
+  encodeAeson = encodeAeson <<< tupleToArray
+
+---
 
 instance EncodeAeson a => EncodeAeson (L.List a) where
   encodeAeson = encodeAeson <<< fromFoldable

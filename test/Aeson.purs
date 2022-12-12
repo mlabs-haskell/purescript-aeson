@@ -69,6 +69,7 @@ import Data.Foldable (all)
 import Data.Maybe (Maybe(..), fromJust, isJust)
 import Data.Number as Number
 import Data.Tuple (Tuple(Tuple))
+import Data.Tuple.Nested (type (/\), (/\))
 import Data.Typelevel.Undefined (undefined)
 import Data.UInt as UInt
 import Mote (test)
@@ -321,6 +322,15 @@ suite = do
     assertTrue_ $ (getFieldOptional tstObj "x") == Right (Nothing :: Maybe Aeson)
     assertTrue_ $ (getFieldOptional tstObj "e") == Right (Just aesonNull :: Maybe Aeson)
     assertTrue_ $ isLeft (getFieldOptional tstObj "e" :: _ (Maybe Boolean))
+
+  test "Tuple encoding/decoding" $ do
+    let
+      tuple4 :: Boolean /\ Boolean /\ Maybe Boolean /\ Array Boolean
+      tuple4 = false /\ true /\ Nothing /\ []
+      tuple4Str = "[false,true,null,[]]"
+
+    assertTrue_ $ decodeJsonString tuple4Str == Right tuple4
+    assertTrue_ $ stringifyAeson (encodeAeson tuple4) == tuple4Str
 
   test "Json -> Aeson" $ do
     quickCheckGen' 10000 do
