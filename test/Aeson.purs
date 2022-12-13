@@ -332,6 +332,22 @@ suite = do
     assertTrue_ $ decodeJsonString tuple4Str == Right tuple4
     assertTrue_ $ stringifyAeson (encodeAeson tuple4) == tuple4Str
 
+    assertTrue_ $
+      (decodeJsonString "false" :: _ (Int /\ Int)) ==
+        Left (TypeMismatch "Tuple")
+
+    assertTrue_ $
+      (decodeJsonString tuple4Str :: _ (Int /\ Int)) ==
+        Left (TypeMismatch "Tuple2")
+
+    assertTrue_ $
+      (decodeJsonString tuple4Str :: _ (Int /\ Int /\ Int)) ==
+        Left (TypeMismatch "Tuple3")
+
+    assertTrue_ $
+      (decodeJsonString tuple4Str :: _ (Boolean /\ Int /\ Int /\ Int)) ==
+        Left (AtIndex 1 $ TypeMismatch "Int")
+
   test "Json -> Aeson" $ do
     quickCheckGen' 10000 do
       json <- jsonGen

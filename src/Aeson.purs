@@ -584,12 +584,15 @@ instance
   ) =>
   DecodeTupleAux (Tuple a (Tuple b c)) where
   tupleLength _ = 1 + tupleLength (Proxy :: Proxy (Tuple b c))
-  tupleFromArray ixCounter arr = unsafePartial $
-    -- Partial is safe here, lenth has been matched in-advance
-    case head arr, tail arr of
+  tupleFromArray ixCounter arr =
+    if len /= length arr then Left $ TypeMismatch $ "Tuple" <> show len
+    -- unsafePartial is safe here, coz we have checked lengths match
+    else unsafePartial $ case head arr, tail arr of
       Just h, Just t -> Tuple
         <$> lmap (AtIndex ixCounter) (decodeAeson h)
         <*> tupleFromArray (ixCounter + 1) t
+    where
+    len = tupleLength (Proxy :: Proxy (Tuple a (Tuple b c)))
 
 else instance
   ( DecodeAeson a
@@ -602,16 +605,13 @@ else instance
       Just a, Just b, Nothing -> Tuple
         <$> lmap (AtIndex $ ixCounter + 0) (decodeAeson a)
         <*> lmap (AtIndex $ ixCounter + 1) (decodeAeson b)
+      _, _, _ -> Left $ TypeMismatch $ "Tuple2"
 
 instance (DecodeTupleAux (Tuple a b)) => DecodeAeson (Tuple a b) where
   -- Decodes nested tuple of arbitrary size, (like Boolean /\ Boolean /\ Boolean /\ ...)
   -- from flat JSON array (like [true, true, true, ...])
-  -- Fails is lengths of tuple and array are different
-  decodeAeson aeson = flip (caseAesonArray $ Left $ TypeMismatch $ "Tuple") aeson \arr ->
-    if length arr /= len then err else tupleFromArray 0 arr
-    where
-    len = tupleLength (Proxy :: Proxy (Tuple a b))
-    err = Left $ TypeMismatch $ "Tuple" <> show len
+  -- Fails if lengths of tuple and array are different
+  decodeAeson = caseAesonArray (Left $ TypeMismatch "Tuple") $ tupleFromArray 0
 
 ---
 
