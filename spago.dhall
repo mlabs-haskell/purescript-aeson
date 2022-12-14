@@ -24,6 +24,7 @@ You can edit this file as you like.
   , "maybe"
   , "mote"
   , "numbers"
+  , "ordered-collections"
   , "partial"
   , "prelude"
   , "quickcheck"

@@ -66,8 +66,10 @@ import Data.BigNumber as BigNumber
 import Data.BooleanAlgebra (implies)
 import Data.Either (Either(..), fromRight, hush, isLeft)
 import Data.Foldable (all)
+import Data.Map.Gen as Map
 import Data.Maybe (Maybe(..), fromJust, isJust)
 import Data.Number as Number
+import Data.Set as Set
 import Data.Tuple (Tuple(Tuple))
 import Data.Tuple.Nested (type (/\), (/\))
 import Data.Typelevel.Undefined (undefined)
@@ -86,6 +88,7 @@ import Test.Gen
   , finiteBigNumberGen
   , jsonGen
   , oneOf
+  , sizedArray
   )
 import Test.QuickCheck (arbitrary, quickCheckGen')
 import Test.Spec.Assertions (shouldEqual)
@@ -392,4 +395,18 @@ suite = do
           (all self)
 
       pure $ noNumber $ toStringifiedNumbersJson aeson
+
+  test "Map encode/decode" $ do
+    quickCheckGen' 100 do
+      _map <- Map.genMap (arbitrary :: _ Int) aesonGen
+
+      pure $
+        (decodeJsonString $ stringifyAeson $ encodeAeson _map) == Right _map
+
+  test "Set encode/decode" $ do
+    quickCheckGen' 100 do
+      set <- Set.fromFoldable <$> sizedArray (arbitrary :: _ Int)
+
+      pure $
+        (decodeJsonString $ stringifyAeson $ encodeAeson set) == Right set
 

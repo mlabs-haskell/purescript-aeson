@@ -113,9 +113,13 @@ import Data.Foldable (foldM, intercalate)
 import Data.Int as Int
 import Data.List as L
 import Data.List.Lazy as LL
+import Data.Map (Map)
+import Data.Map as Map
 import Data.Maybe (Maybe(..), fromJust, maybe)
 import Data.Number (isFinite, isNaN) as Number
 import Data.Sequence (Seq)
+import Data.Set (Set)
+import Data.Set as Set
 import Data.Symbol (class IsSymbol, reflectSymbol)
 import Data.Traversable (traverse)
 import Data.Tuple (Tuple(Tuple))
@@ -131,7 +135,7 @@ import Record as Record
 import Type.Prelude (Proxy(Proxy))
 import Untagged.Union (class InOneOf, type (|+|), asOneOf)
 
--- | A piece of JSON where all numbers are represented as BigNumber (from bignumber.js)
+-- | A piece of JSON where all numbers are represented as `BigNumber` (from bignumber.js)
 foreign import data Aeson :: Type
 
 foreign import aesonEq :: Aeson -> Aeson -> Boolean
@@ -147,6 +151,11 @@ class DecodeAeson (a :: Type) where
 
 ---
 
+-- | Newtype around `a`. `a` can be either `Number` or `BigNumber`.
+-- |
+-- | `Finite Number` is just like `Number` but can not be an `Infinity` or `NaN`.
+-- | Underlying JSON parser ensures parsed numbers are not `NaN` or `Infinity`.
+-- | You can construct `Finite Number` using `finiteNumber` smart constructor.
 newtype Finite a = Finite a
 
 derive newtype instance Eq a => Eq (Finite a)
@@ -406,8 +415,9 @@ caseAesonBigInt def f =
         else Nothing
     )
 
--- | The reson we return `Finite BigNumber` instead plain `BigNumber`
--- | is to simplify things like `caseAesonBigNumber _ fromFiniteBigNumber`
+-- | The reson we return `Finite BigNumber` instead of a plain `BigNumber`,
+-- | is to simplify "round-trip". Like `caseAesonBigNumber _ fromFiniteBigNumber`.
+-- |
 -- | Parser guarantees that all numbers we get from it are finite and not NaN
 caseAesonFiniteBigNumber :: forall (a :: Type). a -> (Finite BigNumber -> a) -> Aeson -> a
 caseAesonFiniteBigNumber def f = caseAeson
@@ -549,9 +559,19 @@ instance DecodeAeson Number where
     (Left $ TypeMismatch "Number")
     Right
 
+instance DecodeAeson (Finite Number) where
+  decodeAeson = caseAesonFiniteNumber
+    (Left $ TypeMismatch "Finite Number")
+    Right
+
 instance DecodeAeson BigNumber where
   decodeAeson = caseAesonBigNumber
     (Left $ TypeMismatch "BigNumber")
+    Right
+
+instance DecodeAeson (Finite BigNumber) where
+  decodeAeson = caseAesonFiniteBigNumber
+    (Left $ TypeMismatch "Finite BigNumber")
     Right
 
 instance DecodeAeson Boolean where
@@ -647,6 +667,12 @@ instance DecodeAeson a => DecodeAeson (LL.List a) where
 
 instance DecodeAeson a => DecodeAeson (Seq a) where
   decodeAeson x = toUnfoldable <$> decodeAeson x
+
+instance (Ord a, DecodeAeson a) => DecodeAeson (Set a) where
+  decodeAeson x = Set.fromFoldable <$> (decodeAeson x :: _ (Array _))
+
+instance (Ord k, DecodeAeson k, DecodeAeson v) => DecodeAeson (Map k v) where
+  decodeAeson x = Map.fromFoldable <$> (decodeAeson x :: _ (Array _))
 
 instance DecodeAeson a => DecodeAeson (Maybe a) where
   decodeAeson aeson =
@@ -809,6 +835,12 @@ instance EncodeAeson a => EncodeAeson (LL.List a) where
 
 instance EncodeAeson a => EncodeAeson (Seq a) where
   encodeAeson = encodeAeson <<< fromFoldable
+
+instance (EncodeAeson a) => EncodeAeson (Set a) where
+  encodeAeson x = encodeAeson $ (Set.toUnfoldable x :: Array _)
+
+instance (EncodeAeson k, EncodeAeson v) => EncodeAeson (Map k v) where
+  encodeAeson x = encodeAeson $ (Map.toUnfoldable x :: Array _)
 
 instance EncodeAeson a => EncodeAeson (Maybe a) where
   encodeAeson Nothing = aesonNull
