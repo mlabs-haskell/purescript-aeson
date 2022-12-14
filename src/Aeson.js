@@ -48,41 +48,61 @@ exports._caseAeson = _caseAeson
 // redefines toJSON method to ensure no exponential notation
 // in toJSON result, for integer number x, where |x| <= 2^512
 
-// const twoIn512 = BigNumber(2).pow(512)
+const twoIn512 = BigNumber(2).pow(512)
 
-// class BigNumberFixed extends BigNumber {
-//     constructor(bignum) {
-//         super(bignum)
-//     }
-//     toJSON() {
-//         if (this.isInteger() && this.abs().lte(twoIn512)) {
-//             console.log(this.toString())
-//             return this.toFixed()
-//         }
+class BigNumberFixed extends BigNumber {
+    constructor(bignum) {
+        super(bignum)
+    }
+    toJSON() {
+        if (this.isInteger() && this.abs().lte(twoIn512))
+            return this.toFixed()
 
-//         return this.toJSON()
-//     }
-// }
+        return super.toJSON()
+    }
+}
 
 //---
 
-// This one is not stack-safe and can
-// throw "Maximum call stack size exceeded" for big json's in practice
-// thus, commented until we found better way to perform this.
+const traverseFormattingBigNumber = json => {
+    const stack = []
 
-const traverseFormattingBigNumber = identity
-// _caseAeson
-//     (identity)                                    // caseNull
-//     (identity)                                    // caseBoolean
-//     (bn => new BigNumberFixed(bn))                // caseBigNumber
-//     (identity)                                    // caseString
-//     (arr => arr.map(traverseFormattingBigNumber)) // caseArray
-//     (object => {                                  // caseObject
-//         const tmp = {}
-//         Object.keys(object).forEach(key =>
-//             tmp[key] = traverseFormattingBigNumber(object[key]))
-//         return tmp
-//     })
+    const go = _caseAeson
+        (identity)                                    // caseNull
+        (identity)                                    // caseBoolean
+        (bn => new BigNumberFixed(bn))                // caseBigNumber
+        (identity)                                    // caseString
+        (arr => {                                     // caseArray
+            const tmp = []
+            arr.forEach((json, idx) => {
+                // push on stack a "thunk", which
+                // when evaluated, will mutate tmp array later
+                stack.push(() => tmp[idx] = go(json))
+            })
+            return tmp
+        })
+        (object => {                                  // caseObject
+            const tmp = {}
+            // reverse here is to preserver order of field
+            // thay are pushed on stack, so will be processed
+            // in reverse order
+            Object.keys(object).reverse().forEach(key => {
+                stack.push(() => tmp[key] = go(object[key]))
+            })
+            return tmp
+        })
+
+    const result = go(json)
+
+    // evaluate all thunks on stack while
+    // there are no more thunks to evaluate
+    // initial thunks pushed on stack
+    // dring evaluation of `go(json)` upper
+    while (stack.length !== 0)
+        stack.pop()()
+
+    return result
+}
 
 exports.stringifyAeson = json => JSONbig.stringify(traverseFormattingBigNumber(json))
 
