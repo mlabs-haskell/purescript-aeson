@@ -415,7 +415,7 @@ caseAesonBigInt def f =
         else Nothing
     )
 
--- | The reson we return `Finite BigNumber` instead of a plain `BigNumber`,
+-- | The reason we return `Finite BigNumber` instead of a plain `BigNumber`,
 -- | is to simplify "round-trip". Like `caseAesonBigNumber _ fromFiniteBigNumber`.
 -- |
 -- | Parser guarantees that all numbers we get from it are finite and not NaN
