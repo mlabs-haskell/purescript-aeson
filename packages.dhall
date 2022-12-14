@@ -137,51 +137,21 @@ let additions =
         , repo = "https://github.com/garyb/purescript-mote"
         , version = "v1.1.0"
         }
-      , medea =
+      , bignumber =
         { dependencies =
-          [ "aff"
-          , "argonaut"
-          , "arrays"
-          , "bifunctors"
-          , "control"
+          [ "console"
           , "effect"
           , "either"
-          , "enums"
           , "exceptions"
-          , "foldable-traversable"
-          , "foreign-object"
-          , "free"
+          , "functions"
           , "integers"
-          , "lists"
-          , "maybe"
-          , "mote"
-          , "naturals"
-          , "newtype"
-          , "node-buffer"
-          , "node-fs-aff"
-          , "node-path"
-          , "nonempty"
-          , "ordered-collections"
-          , "parsing"
           , "partial"
           , "prelude"
-          , "psci-support"
-          , "quickcheck"
-          , "quickcheck-combinators"
-          , "safely"
-          , "spec"
-          , "strings"
-          , "these"
-          , "transformers"
-          , "typelevel"
           , "tuples"
-          , "unicode"
-          , "unordered-collections"
-          , "unsafe-coerce"
           ]
-        , repo = "https://github.com/juspay/medea-ps.git"
-        , version = "8b215851959aa8bbf33e6708df6bd683c89d1a5a"
+        , repo = "https://github.com/mlabs-haskell/purescript-bignumber"
+        , version = "58c51448be23c05caf51cde45bb3b09cc7169447"
         }
       }
 
-in  upstream // additions
+in upstream // additions

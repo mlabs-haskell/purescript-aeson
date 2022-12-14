@@ -1,58 +1,32 @@
-module TestM where
+module Test.TestM where
 
 import Prelude
-import Control.Alt (class Alt)
-import Control.Alternative (class Alternative)
-import Control.MonadPlus (class MonadPlus)
-import Control.Monad.Except.Trans (ExceptT, runExceptT)
-import Control.Monad.Error.Class
-  ( class MonadError
-  , class MonadThrow
-  , throwError
-  )
-import Control.MonadZero (class MonadZero)
-import Control.Plus (class Plus)
+
 import Data.Const (Const)
-import Data.Either (Either(..))
-import Data.Identity (Identity(..))
-import Data.Medea (ValidationError(EmptyError))
+import Effect (Effect)
 import Effect.Aff (Aff)
-import Mote (MoteT)
+import Data.Foldable (sequence_)
+import Effect.Class (liftEffect)
+import Mote (MoteT, Plan, foldPlan, planT)
+import Test.Spec (Spec, describe, it)
+import Test.Spec.Reporter (consoleReporter)
+import Test.Spec.Runner (runSpec)
 
-type TestPlanM a = MoteT (Const Void) (Aff Unit) Aff a
 
--- this silly thing is needed because Medea's `validate` needs both
--- MonadPlus and MonadError, there must be a better way
--- or it should be upstreamed to medea-ps as a default
-newtype ValidationM a = ValidationM (ExceptT ValidationError Identity a)
+type TestPlanM a = MoteT (Const Void) (Effect Unit) Aff a
 
-derive newtype instance functorValidationM :: Functor ValidationM
-derive newtype instance applyValidationM :: Apply ValidationM
-derive newtype instance applicativeValidationM :: Applicative ValidationM
-derive newtype instance bindValidationM :: Bind ValidationM
-derive newtype instance monadValidationM :: Monad ValidationM
-derive newtype instance monadThrowValidationM ::
-  MonadThrow ValidationError ValidationM
-
-derive newtype instance monadErrorValidationM ::
-  MonadError ValidationError ValidationM
-
--- note: MonadZero is being deprecated
-derive newtype instance monadZeroValidationM :: MonadZero ValidationM
-derive newtype instance monadPlusValidationM :: MonadPlus ValidationM
-instance altValidationM :: Alt ValidationM where
-  alt (ValidationM first) (ValidationM second) = case runExceptT first of
-    (Identity (Right a)) -> pure a
-    (Identity (Left _)) -> case runExceptT second of
-      (Identity (Right a)) -> pure a
-      (Identity (Left e)) -> throwError e
-
-instance plusValidationM :: Plus ValidationM where
-  empty = throwError EmptyError
-
-instance alternativeValidationM :: Alternative ValidationM
-
-runValidationM :: forall a. ValidationM a -> Either ValidationError a
-runValidationM (ValidationM etvia) = do
-  let (Identity eva) = runExceptT etvia
-  eva
+-- | We use `mote` here so that we can use effects to build up a test tree, which
+-- | is then interpreted here in a pure context, mainly due to some painful types
+-- | in Test.Spec which prohibit effects.
+interpret :: TestPlanM Unit -> Aff Unit
+interpret spif = do
+  plan <- planT spif
+  runSpec [ consoleReporter ] $ go plan
+  where
+  go :: Plan (Const Void) (Effect Unit) -> Spec Unit
+  go =
+    foldPlan
+      (\x -> it x.label $ liftEffect $ x.value)
+      (const $ pure unit)
+      (\x -> describe x.label $ go x.value)
+      sequence_

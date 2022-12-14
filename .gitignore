@@ -1,0 +1,16 @@
+/output/
+/generated-docs/
+/.purs*
+/.psa*
+/.spago
+/.spago2nix*
+/.psc-ide-port
+/.psci_modules
+result
+result-*
+.envrc
+.direnv
+.projectile
+.idea
+node_modules
+.vscode

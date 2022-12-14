@@ -4,299 +4,409 @@ import Prelude
 
 import Aeson
   ( Aeson
-  , AesonCases
-  , caseAeson
+  , JsonDecodeError(..)
+  , aesonNull
+  , caseAesonArray
+  , caseAesonBigInt
+  , caseAesonBigNumber
   , caseAesonBoolean
+  , caseAesonFiniteBigNumber
+  , caseAesonFiniteNumber
+  , caseAesonInt
   , caseAesonNull
+  , caseAesonObject
   , caseAesonString
-  , constAesonCases
+  , caseAesonUInt
   , decodeAeson
   , decodeJsonString
   , encodeAeson
+  , finiteBigNumber
+  , fromArray
+  , fromBigInt
+  , fromBoolean
+  , fromFiniteBigNumber
+  , fromInt
+  , fromObject
+  , fromString
+  , fromUInt
   , getField
+  , getFieldOptional
+  , getFieldOptional'
   , getNestedAeson
-  , getNumberIndex
+  , isArray
+  , isBigInt
+  , isBigNumber
+  , isBoolean
+  , isInt
+  , isNull
+  , isNumber
+  , isObject
+  , isString
+  , isUInt
   , jsonToAeson
   , parseJsonStringToAeson
   , stringifyAeson
+  , toArray
+  , toBigInt
+  , toBigNumber
+  , toBoolean
+  , toInt
+  , toNull
+  , toNumber
   , toObject
+  , toString
   , toStringifiedNumbersJson
+  , toUInt
+  , unpackFinite
   )
-import Control.Apply (lift2)
-import Control.Monad.Cont (lift)
-import Data.Argonaut (encodeJson, parseJson)
-import Data.Argonaut as Json
-import Data.Array (head, zip, (!!))
-import Data.Either (Either(Right, Left), hush)
-import Data.Maybe (Maybe(Nothing, Just), fromJust, fromMaybe, isJust)
-import Data.Newtype (unwrap)
-import Data.Sequence as Seq
-import Data.Traversable (for_, traverse)
-import Data.Tuple (Tuple(Tuple), uncurry)
-import Data.Tuple.Nested ((/\))
-import Effect.Class (liftEffect)
-import Effect.Exception (error, throwException)
-import Foreign.Object as FO
-import Mote (group, test)
-import Node.Encoding (Encoding(UTF8))
-import Node.FS.Aff (readTextFile, readdir)
-import Node.Path (FilePath)
+import Control.Lazy (fix)
+import Data.Argonaut (Json, caseJson)
+import Data.Argonaut as Argonaut
+import Data.BigNumber as BigNumber
+import Data.BooleanAlgebra (implies)
+import Data.Either (Either(..), fromRight, hush, isLeft)
+import Data.Foldable (all)
+import Data.Map.Gen as Map
+import Data.Maybe (Maybe(..), fromJust, isJust)
+import Data.Number as Number
+import Data.Set as Set
+import Data.Tuple (Tuple(Tuple))
+import Data.Tuple.Nested (type (/\), (/\))
+import Data.Typelevel.Undefined (undefined)
+import Data.UInt as UInt
+import Mote (test)
 import Partial.Unsafe (unsafePartial)
-import Test.ArbitraryJson
-  ( ArbBigInt(..)
-  , ArbJson
-  , ArbUInt(..)
-  , stringifyArbJson
+import Test.Gen
+  ( aesonArrayGen
+  , aesonBigNumberGen
+  , aesonGen
+  , aesonNullGen
+  , aesonObjectGen
+  , aesonStringGen
+  , bigNumberStrGen
+  , defaultNumberGenConf
+  , finiteBigNumberGen
+  , jsonGen
+  , oneOf
+  , sizedArray
   )
-import Test.QuickCheck (quickCheck', (<?>))
+import Test.QuickCheck (arbitrary, quickCheckGen')
 import Test.Spec.Assertions (shouldEqual)
-import Test.Utils (assertTrue)
-import TestM (TestPlanM)
+import Test.TestM (TestPlanM)
+import Test.Utils (assertTrue_)
+
+iff :: Boolean -> Boolean -> Boolean
+iff a b = (a `implies` b) && (b `implies` a)
+
+---
 
 suite :: TestPlanM Unit
 suite = do
-  group "Aeson encode" do
-    test "Record" $ liftEffect do
-      let
-        expected = { a: 10 }
-      decodeJsonString "{\"a\": 10}" `shouldEqual` Right expected
-    test "Object" $ liftEffect do
-      let
-        expected = FO.fromFoldable [ "a" /\ 1, "b" /\ 2 ]
-      decodeAeson (encodeAeson expected) `shouldEqual` Right expected
-    test "Maybe" $ liftEffect do
-      let
-        expected = Just 1
-      decodeAeson (encodeAeson expected) `shouldEqual` Right expected
-
-  group "Object field accessing" do
+  test "Incorrect JSON" $ do
     let
-      asn = unsafePartial $ fromRight $ parseJsonStringToAeson
-        "{\"a\": 10, \"b\":[{\"b1\":\"valb\"}], \"c\":{\"c1\": \"valc\"}}"
-      asnObj = unsafePartial $ fromJust $ toObject $ asn
-    test "getField" $ liftEffect do
-      getField asnObj "a" `shouldEqual` Right 10
-      getField asnObj "b" `shouldEqual` Right ([ { b1: "valb" } ])
+      error :: Either JsonDecodeError Int
+      error = Left $ TypeMismatch "JSON String"
+    decodeJsonString "{" `shouldEqual` error
 
-    test "getNestedAeson" $ liftEffect do
-      (getNestedAeson asn [ "c", "c1" ] >>= decodeAeson) `shouldEqual`
-        (Right "valc")
+  -- Round trip Aeson -> String -> Aeson should be id
+  test "Roud trip: Aeson -> String -> Aeson" $
+    quickCheckGen' 10000 do
+      aeson <- aesonGen
 
-  group "Json <-> Aeson" do
-    test "toStringifiedNumbersJson" $ liftEffect do
+      pure $ Right aeson == parseJsonStringToAeson (stringifyAeson aeson)
+
+  -- Test parser quirks
+  -- Parser should parse exactly same number as parseBigNumber
+  -- or fail in case number is Infinite
+  test "JS-side parser parse only finite and non-nan numbers" $
+    quickCheckGen' 10000 do
+      numberStr <- bigNumberStrGen defaultNumberGenConf
+
       let
-        asn = unsafePartial $ fromRight $ parseJsonStringToAeson
-          "{\"a\":10,\"b\":[{\"b1\":\"valb\"}],\"c\":{\"c1\":\"valc\"}}"
-        expected =
-          "{\"a\":\"10\",\"b\":[{\"b1\":\"valb\"}],\"c\":{\"c1\":\"valc\"}}"
-      Json.stringify (toStringifiedNumbersJson asn) `shouldEqual` expected
+        aesonFromFbn = do
+          bn <- hush $ BigNumber.parseBigNumber numberStr
+          fromFiniteBigNumber <$> finiteBigNumber bn
 
-    test "jsonToAeson" $ liftEffect do
-      let
-        jsn = unsafePartial $ fromRight $ parseJson
-          "{\"a\":10,\"b\":[{\"b1\":\"valb\"}],\"c\":{\"c1\":\"valc\"}}"
-        expected =
-          "{\"a\":\"10\",\"b\":[{\"b1\":\"valb\"}],\"c\":{\"c1\":\"valc\"}}"
-      (jsonToAeson jsn # toStringifiedNumbersJson # Json.stringify)
-        `shouldEqual` expected
+        aesonFromStr = hush (parseJsonStringToAeson numberStr)
 
-  group "caseAeson" do
-    test "caseObject" $ liftEffect do
-      let asn = jsonToAeson $ encodeJson { a: 10 }
-      (caseMaybeAeson _ { caseObject = Just <<< flip getField "a" }) asn
-        `shouldEqual`
-          (Just $ Right 10)
-    test "caseArray" $ liftEffect do
-      let asn = jsonToAeson $ encodeJson [ 10 ]
-      (caseMaybeAeson _ { caseArray = map decodeAeson <<< head }) asn
-        `shouldEqual`
-          (Just $ Right 10)
-    test "caseNumber" $ liftEffect do
-      let asn = jsonToAeson $ encodeJson 20222202
-      (caseMaybeAeson _ { caseNumber = Just }) asn `shouldEqual`
-        (Just "20222202")
+      pure $ aesonFromFbn == aesonFromStr
 
-  group "Fixture tests for parseJsonStringifyNumbers" $ do
-    parseNumbersTests
-    parseStringTests
-    parseBoolAndNullTests
-    fixtureTests
+  -- Round trip (Aeson ->) String -> Aeson -> String
+  -- Precondition: initial string obtained from stringifying
+  -- of Aeson. This seems to be redundant as we have "proof" of
+  -- Aeson -> String -> Aeson round trip
+  -- But, in practice equal Aesons can produce different string
+  -- because Aeson equality is structural. I.e. {a: 0, b: 0} == {b: 0, a: 0}
+  -- In fact, this test ensures that stringify does not change objects
+  -- keys order, etc.
+  test "Round trip: (Aeson ->) String -> Aeson -> String" $
+    quickCheckGen' 10000 do
+      aeson <- aesonGen
+      let aesonStr = stringifyAeson aeson
+      pure $ (stringifyAeson <$> parseJsonStringToAeson aesonStr) == Right aesonStr
 
-  group "Arbitrary Aeson" do
-    testStringifyArbitraryAeson
+  -- "X encoding/decoding and functions coherence" test family
+  -- checks that functions like isX, toX, caseAesonX are coherent
+  -- and (caseAesonX _ fromX) is id
+  test "Null encoding/decoding and functions coherence"
+    $ assertTrue_
+    $ isNull aesonNull
+        && isJust (toNull aesonNull)
+        && caseAesonNull Nothing (Just <<< const aesonNull) aesonNull == Just aesonNull
 
-  group "EncodeAeson >>> DecodeAeson == identity" do
-    testEncodeDecodeAesonIdentity
-
--- | This function reads from `./fixtures/` folder.
--- | `expected/*` contains JSONs corresponding to `Aeson` type (with number
--- | index) as returned by `parseJsonExtractingIntegers`.
--- | Here the number index in fixtures is compared with the parsed one.
-fixtureTests :: TestPlanM Unit
-fixtureTests = do
-  fixtures <- lift2 zip (readFixtures "input/") (readFixtures "expected/")
-  for_ fixtures $ mkTest (uncurry testFixture)
-  where
-  testFixture
-    :: Tuple FilePath String -> Tuple FilePath String -> Tuple String Boolean
-  testFixture (Tuple inputPath input) (Tuple _expectedPath expected) =
+  test "Boolean encoding/decoding and functions coherence" do
     let
-      mkError msg = Tuple (msg <> ": " <> show inputPath) false
-    in
-      case parseJsonStringToAeson input /\ Json.jsonParser expected of
-        Right aeson /\ Right json ->
-          case Json.caseJsonArray Nothing (\arr -> arr !! 1) json of
-            Nothing -> mkError "Failed to decode expected json"
-            Just (res :: Json.Json) ->
-              case Json.decodeJson res :: Either _ (Array String) of
-                Left _ -> mkError "Unable to decode NumberIndex"
-                Right numberStrings ->
-                  if getNumberIndex aeson == Seq.fromFoldable numberStrings then
-                    Tuple
-                      "NumberIndex is correct"
-                      true -- success
-                  else mkError "NumberIndex does not match fixture"
-        Left err /\ _ -> mkError $ "Failed to parse input JSON: " <> show err
-        _ /\ Left err -> mkError $ "Failed to parse expected JSON: " <> show err
+      aesonTrue = fromBoolean true
+      aesonFalse = fromBoolean false
 
-  readFixtures :: FilePath -> TestPlanM (Array (Tuple FilePath String))
-  readFixtures dirn = lift $
-    let
-      d = (fixtureDir <> dirn)
-      readTestFile fp = Tuple fp <$> readTextFile UTF8 fp
-    in
-      readdir d >>= traverse (readTestFile <<< (<>) d)
+    assertTrue_ $ isBoolean aesonTrue
+      && isJust (toBoolean aesonTrue)
+      && caseAesonBoolean Nothing (Just <<< fromBoolean) aesonTrue == Just aesonTrue
 
-  fixtureDir = "./fixtures/test/parsing/json_stringify_numbers/"
+    assertTrue_ $ isBoolean aesonFalse
+      && isJust (toBoolean aesonFalse)
+      && caseAesonBoolean Nothing (Just <<< fromBoolean) aesonFalse == Just aesonFalse
 
--- | Make simple test
-mkTest :: forall a. (a -> Tuple String Boolean) -> a -> TestPlanM Unit
-mkTest doTest inp =
-  let
-    Tuple errMsg testRes = doTest inp
-  in
-    if testRes then pure unit
-    else liftEffect $ throwException $ error errMsg
+  test "String encoding/decoding and functions coherence" $
+    quickCheckGen' 10000 do
+      aeson <- aesonStringGen
+      pure $ isString aeson
+        && isJust (toString aeson)
+        && caseAesonString Nothing (Just <<< fromString) aeson == Just aeson
 
-parseBoolAndNullTests :: TestPlanM Unit
-parseBoolAndNullTests = do
-  testNull
-  testBoolean "false"
-  testBoolean "true"
-  where
-  testNull = testSimpleValue "null" $ \json ->
-    Tuple "jsonTurnNumbersToStrings altered null value"
-      (caseAesonNull false (const true) json)
+  test "Array encoding/decoding and functions coherence" $
+    quickCheckGen' 10000 do
+      aeson <- aesonArrayGen aesonGen
+      pure $ isArray aeson
+        && isJust (toArray aeson)
+        && caseAesonArray Nothing (Just <<< fromArray) aeson == Just aeson
 
-  testBoolean s = testSimpleValue s $ \json ->
-    Tuple "jsonTurnNumbersToStrings altered null value"
-      (caseAesonBoolean false (const true) json)
+  test "Object encoding/decoding and functions coherence" $
+    quickCheckGen' 10000 do
+      aeson <- aesonObjectGen (Tuple <$> arbitrary <*> aesonGen)
+      pure $ isObject aeson
+        && isJust (toObject aeson)
+        && caseAesonObject Nothing (Just <<< fromObject) aeson == Just aeson
 
-parseNumbersTests :: TestPlanM Unit
-parseNumbersTests = do
-  testNumber "123123123123123123123100"
-  testNumber "100"
-  testNumber "0.2"
-  testNumber "-10e-20"
-  testNumber "20E+20"
-  where
-  testNumber s = testSimpleValue s $ \aeson -> do
-    if Seq.length (getNumberIndex aeson) == 0 then
-      Tuple
-        ( "parseJsonStringifyNumbers did not change number to string when parsing string: "
-            <>
-              stringifyAeson aeson
+  test "BigNumber encoding/decoding and functions coherence" $
+    quickCheckGen' 10000 do
+      aeson <- aesonBigNumberGen defaultNumberGenConf
+      pure $
+        ( flip (caseAesonBigNumber false) aeson \bn ->
+            BigNumber.isFinite bn && not (BigNumber.isNaN bn)
         )
-        false
-    else Tuple
-      ("parseJsonStringifyNumbers changed read number: " <> s <> " -> " <> s)
-      (stringifyAeson aeson == s)
+          && isBigNumber aeson
+          && isJust (toBigNumber aeson)
+          && caseAesonFiniteBigNumber Nothing (Just <<< fromFiniteBigNumber) aeson == Just aeson
 
-parseStringTests :: TestPlanM Unit
-parseStringTests = do
-  testString "\"\""
-  testString "\"test\""
-  testString "\"1231231\""
-  testString "\"123\\\"1231\\\"12\""
-  testString "\"sth\\\"12sd31\\\"s12\""
-  where
-  testString s = testSimpleValue s $ \aeson ->
-    caseAesonString
-      ( Tuple
-          ( "parseJsonStringifyNumbers produced no string when parsing string: "
-              <> stringifyAeson
-                aeson
-          )
-          false
-      )
-      ( \decoded -> Tuple
-          ( "parseJsonStringifyNumbers changed read string: " <> s <> " -> " <>
-              decoded
-          )
-          (show decoded == s)
-      )
-      aeson
+  test "Int encoding/decoding and functions coherence" $ do
+    assertTrue_ $ (toInt <$> parseJsonStringToAeson "1.0") == Right (Just 1)
+    assertTrue_ $ (toInt <$> parseJsonStringToAeson "1.0000000000000001") == Right (Nothing)
 
-caseMaybeAeson
-  :: forall b a
-   . (AesonCases (Maybe a) -> AesonCases (Maybe b))
-  -> Aeson
-  -> Maybe b
-caseMaybeAeson upd = caseAeson (constAesonCases Nothing # upd)
+    quickCheckGen' 10000 do
+      fbn <- finiteBigNumberGen defaultNumberGenConf
+      let
+        aeson = fromFiniteBigNumber fbn
+        bn = unpackFinite fbn
 
-fromRight :: forall (a :: Type) (e :: Type). Partial => Either e a -> a
-fromRight (Right x) = x
+      let
+        intInBounds =
+          BigNumber.isInteger bn
+            && BigNumber.fromInt bottom <= bn
+            && bn <= BigNumber.fromInt top
 
-testSimpleValue :: String -> (Aeson -> Tuple String Boolean) -> TestPlanM Unit
-testSimpleValue s jsonCb = uncurry assertTrue $
-  case (parseJson s) of
-    Left _ -> Tuple "Invalid json passed to test." false
-    Right _ -> case parseJsonStringToAeson s of
-      Left _ -> Tuple
-        ("Argonaut could not parse jsonTurnNumbersToStrings result: " <> s)
-        false
-      Right json -> jsonCb json
+      let
+        coherence =
+          isInt aeson
+            && isJust (toInt aeson)
+            && caseAesonInt Nothing (Just <<< fromInt) aeson == Just aeson
 
-testStringifyArbitraryAeson :: TestPlanM Unit
-testStringifyArbitraryAeson = liftEffect $ quickCheck' 3000 \arbJson ->
+      pure $ intInBounds `iff` coherence
+
+  test "UInt encoding/decoding and functions coherence" $ do
+    assertTrue_ $ (toUInt <$> parseJsonStringToAeson "1.0") == Right (Just (UInt.fromInt 1))
+
+    assertTrue_ $ (toUInt <$> parseJsonStringToAeson "1.0000000000000001") == Right (Nothing)
+
+    quickCheckGen' 10000 do
+      fbn <- finiteBigNumberGen defaultNumberGenConf
+      let
+        aeson = fromFiniteBigNumber fbn
+        bn = unpackFinite fbn
+
+      let
+        intInBounds =
+          BigNumber.isInteger bn
+            && BigNumber.fromUInt bottom <= bn
+            && bn <= BigNumber.fromUInt top
+
+      let
+        coherence =
+          isUInt aeson
+            && isJust (toUInt aeson)
+            && caseAesonUInt Nothing (Just <<< fromUInt) aeson == Just aeson
+
+      pure $ intInBounds `iff` coherence
+
+  test "BigInt encoding/decoding and functions coherence" $
+    quickCheckGen' 10000 do
+      fbn <- finiteBigNumberGen defaultNumberGenConf { expDigitsUpTo = 2 }
+      let
+        aeson = fromFiniteBigNumber fbn
+        bn = unpackFinite fbn
+
+      let
+        coherence =
+          isBigInt aeson
+            && isJust (toBigInt aeson)
+            && caseAesonBigInt Nothing (Just <<< fromBigInt) aeson == Just aeson
+
+      pure $ BigNumber.isInteger bn `iff` coherence
+
+  test "Number encoding/decoding and functions coherence" $
+    quickCheckGen' 10000 do
+      aeson <- aesonBigNumberGen defaultNumberGenConf
+
+      let
+        isFiniteNumber =
+          caseAesonBigNumber false
+            ( \bn ->
+                let
+                  n = BigNumber.toNumber bn
+                in
+                  Number.isFinite n && not (Number.isNaN n)
+            )
+            aeson
+
+      pure $ isFiniteNumber `iff`
+        ( isNumber aeson
+            && isJust (toNumber aeson)
+            && caseAesonFiniteNumber false (const true) aeson
+        )
+  -- use eqApproximate from Data.Number.Approximate here?
+  -- && caseAesonFiniteNumber Nothing (Just <<< fromFiniteNumber) aeson == Just aeson
+
+  test "Maybe encoding/decoding" $ do
+    quickCheckGen' 10000 do
+      aeson <- unsafePartial $ oneOf [ aesonNullGen, aesonGen ]
+      pure $ isNull aeson `iff` (decodeAeson aeson == Right (Nothing :: Maybe Aeson))
+
+  ----
+
   let
-    jsonString = stringifyArbJson arbJson
-    res = do
-      aeson1 <- hush $ parseJsonStringToAeson jsonString
-      aeson2 <- hush $ parseJsonStringToAeson $ stringifyAeson aeson1
-      pure $ aeson1 /\ aeson2
-  in
-    fromMaybe false (res <#> uncurry eq) <?>
-      "Test failed for input " <> show (isJust res) <> " - " <> jsonString
+    tstStr = "{\"a\":10,\"c\":{\"d\":\"val\"},\"e\": null}"
+    tstAeson = fromRight undefined $ parseJsonStringToAeson tstStr
+    tstObj = unsafePartial $ fromJust $ toObject $ tstAeson
+    tstRec = { a: 10, c: { d: "val" } }
 
-testEncodeDecodeAesonIdentity :: TestPlanM Unit
-testEncodeDecodeAesonIdentity = do
-  test "Int" $ liftEffect $ quickCheck' 30 \(i :: Int) ->
-    (i # encodeAeson # decodeAeson) ==
-      Right i
-  test "BigInt" $ liftEffect $ quickCheck' 30 \(ArbBigInt i) ->
-    (i # encodeAeson # decodeAeson)
-      == Right i
-  test "UInt" $ liftEffect $ quickCheck' 30 \(ArbUInt i) ->
-    (i # encodeAeson # decodeAeson) ==
-      Right i
-  test "Boolean" $ liftEffect $ quickCheck' 3 \(i :: Boolean) ->
-    (i # encodeAeson # decodeAeson)
-      == Right i
-  test "String" $ liftEffect $ quickCheck' 30 \(i :: String) ->
-    (i # encodeAeson # decodeAeson)
-      == Right i
-  test "Array" $ liftEffect $ quickCheck' 30 \(i :: Array ArbBigInt) ->
-    (i # map unwrap # encodeAeson # decodeAeson) == Right (map unwrap i)
-  test "Record" $ liftEffect $ quickCheck' 30
-    \( i
-         :: { a :: { b :: Int, c :: Number, d :: Array Int }
-            , e :: { f :: String, g :: Boolean }
-            }
-     ) ->
-      (i # encodeAeson # decodeAeson) == Right i
-  test "Aeson" $ liftEffect $ quickCheck' 100 \(i :: ArbJson) ->
-    let j = i # arbAeson in (j # encodeAeson # decodeAeson) == Right j
-  where
-  arbAeson aj = unsafePartial $ fromJust $ hush $ parseJsonStringToAeson $
-    stringifyArbJson aj
+  test "Record encoding/decoding" $ do
+
+    assertTrue_ $ decodeJsonString tstStr == Right tstRec
+
+    -- Fields in stringified record are sorted
+    -- by RowToList, this is an implementation detail.
+    -- Thus, we can not expect:
+    -- assertTrue_ $ (stringifyAeson $ encodeAeson tstRec) == (tstStr)
+    assertTrue_ $ (decodeJsonString $ stringifyAeson $ encodeAeson tstRec) == Right tstRec
+
+  test "getField"
+    $ assertTrue_
+    $ getField tstObj "a" == Right 10
+
+  test "getNestedAeson"
+    $ assertTrue_
+    $ (getNestedAeson tstAeson [ "c", "d" ] >>= decodeAeson) == Right "val"
+
+  test "getFieldOptional'" $ do
+    assertTrue_ $ (getFieldOptional' tstObj "x") == Right (Nothing :: Maybe Aeson)
+    assertTrue_ $ (getFieldOptional' tstObj "e") == Right (Nothing :: Maybe Aeson)
+
+  test "getFieldOptional" $ do
+    assertTrue_ $ (getFieldOptional tstObj "x") == Right (Nothing :: Maybe Aeson)
+    assertTrue_ $ (getFieldOptional tstObj "e") == Right (Just aesonNull :: Maybe Aeson)
+    assertTrue_ $ isLeft (getFieldOptional tstObj "e" :: _ (Maybe Boolean))
+
+  test "Tuple encoding/decoding" $ do
+    let
+      tuple4 :: Boolean /\ Boolean /\ Maybe Boolean /\ Array Boolean
+      tuple4 = false /\ true /\ Nothing /\ []
+      tuple4Str = "[false,true,null,[]]"
+
+    assertTrue_ $ decodeJsonString tuple4Str == Right tuple4
+    assertTrue_ $ stringifyAeson (encodeAeson tuple4) == tuple4Str
+
+    assertTrue_ $
+      (decodeJsonString "false" :: _ (Int /\ Int)) ==
+        Left (TypeMismatch "Tuple")
+
+    assertTrue_ $
+      (decodeJsonString tuple4Str :: _ (Int /\ Int)) ==
+        Left (TypeMismatch "Tuple2")
+
+    assertTrue_ $
+      (decodeJsonString tuple4Str :: _ (Int /\ Int /\ Int)) ==
+        Left (TypeMismatch "Tuple3")
+
+    assertTrue_ $
+      (decodeJsonString tuple4Str :: _ (Boolean /\ Int /\ Int /\ Int)) ==
+        Left (AtIndex 1 $ TypeMismatch "Int")
+
+  test "Json -> Aeson" $ do
+    quickCheckGen' 10000 do
+      json <- jsonGen
+
+      let
+        -- alternative implementation of jsonToAeson
+        -- if both implementations match, they are,
+        -- probably, fine
+        yetAnotherJsonToAeson :: Json -> Aeson
+        yetAnotherJsonToAeson =
+          unsafePartial alwaysRight <<< decodeJsonString <<< Argonaut.stringify
+          where
+          -- valid json should always decode without errors
+          -- error "Impossible happened: valid json should always decode without errors"
+          alwaysRight :: Partial => _
+          alwaysRight (Right x) = x
+
+      pure $ jsonToAeson json == yetAnotherJsonToAeson json
+
+  -- At least, we don't expect any numers in Json we got from
+  -- toStringifiedNumbersJson
+  --
+  -- Better test, which tests that strings, representing numbers,
+  -- actually correspond to initial numbers
+  -- requires to track number positions
+  -- as in result numbers are no more distinguishable from other strings
+  test "Aeson -> Json" $ do
+    quickCheckGen' 10000 do
+      aeson <- aesonGen
+
+      let
+        -- alternative implementation of jsonToAeson
+        -- if both implementations match, they are,
+        -- probably, fine
+        noNumber :: Json -> Boolean
+        noNumber = fix \self -> caseJson
+          (const true)
+          (const true)
+          (const false) -- number
+          (const true)
+          (all self)
+          (all self)
+
+      pure $ noNumber $ toStringifiedNumbersJson aeson
+
+  test "Map encode/decode" $ do
+    quickCheckGen' 100 do
+      _map <- Map.genMap (arbitrary :: _ Int) aesonGen
+
+      pure $
+        (decodeJsonString $ stringifyAeson $ encodeAeson _map) == Right _map
+
+  test "Set encode/decode" $ do
+    quickCheckGen' 100 do
+      set <- Set.fromFoldable <$> sizedArray (arbitrary :: _ Int)
+
+      pure $
+        (decodeJsonString $ stringifyAeson $ encodeAeson set) == Right set
+

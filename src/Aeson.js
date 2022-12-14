@@ -1,122 +1,212 @@
-// parseJsonExtractingIntegers
-//   :: String -> {patchedPayload :: String, numberIndex :: Array String}
-exports.parseJsonExtractingIntegers = str => {
-    const [patchedPayload, numberIndex] = parseJsonExtractingIntegers(str);
-    return {patchedPayload, numberIndex};
-};
+const {BigNumber} = require("bignumber.js")
 
-exports.stringifyAeson_ = numberIndex => originalObject => {
-    const fatal = msg => {
-        throw new Error("Error in stringifyObject: " + msg);
-    };
+const JSONbig = require("@khavryliuk/json-bigint")({})
 
-    let res = '';
+//---
 
-    // Recursively iterate over object fields.
-    // TODO: use a trampoline?
-    const go = object => {
-        if (object === null || typeof object == 'string' || typeof object == 'boolean') {
-            res += JSON.stringify(object);
-        } else if (object instanceof Array) {
-            res += '[';
-            object.forEach((elem, ix) => {
-                go(elem);
-                if (ix != object.length - 1) {
-                    res += ',';
-                }
-            });
-            res += ']';
-        } else if (typeof object == 'object') {
-            res += '{';
-            let keys = [];
-            for (let key in object) {
-                if (object.hasOwnProperty(key)) {
-                    keys.push(key);
-                }
-            };
-            keys.sort(); // for stability of Eq instance
-            keys.forEach((key, ix) => {
-                res += JSON.stringify(key);
-                res += ':';
-                go(object[key]);
-                if (ix != keys.length - 1) {
-                    res += ',';
-                }
-            });
-            res += '}';
-        } else if (typeof object == 'number') {
-            if (object in numberIndex) {
-                res += numberIndex[object];
-            } else {
-                fatal("No such index in numberIndex!");
-            }
-        } else {
-            fatal("Wrong type of object: " + typeof object);
-        }
-    };
+const identity = x => x
+exports.fromBoolean = identity
+exports.fromString = identity
+exports.fromFiniteBigNumber = identity
+exports.fromArray = identity
+exports.fromObject = identity
+exports.aesonNull = null
 
-    go(originalObject);
-    return res;
-};
+const _caseAeson =
+    caseNull =>
+    caseBoolean =>
+    caseBigNumber =>
+    caseString =>
+    caseArray =>
+    caseObject =>
+    json => {
+        if (json === null)
+            return caseNull(json)
 
-// NOTE: For a general overview of this function's purpose,
-//       consult module docstring in Aeson.purs
-const parseJsonExtractingIntegers = str => {
-    const s = String(str);
+        if (typeof json === "boolean")
+            return caseBoolean(json)
 
-    const index = [];
-    let counter = 0;
-    let numberAcc = [];
+        if (typeof json === "string")
+            return caseString(json)
 
-    const arr = [];
-    let in_number = false;
-    let in_string = false;
-    let escaped = -1;
+        if (BigNumber.isBigNumber(json))
+            return caseBigNumber(json);
 
-    for (let i = 0, n = s.length; i < n; ++i) {
-        const c = s[i];
-        // set the escape flag
-        if (in_string && escaped!=i){
-            if (c == "\\"){
-                escaped = i+1;
-            }
-        }
-        // set in_string flag
-        if (c == '"' && escaped!=i) {
-            in_string = !in_string;
-        }
-        // set in_number flag and quote numbers
-        if(!in_string){
-            if (c >= '0' && c <= '9' || c == '-') {
-                if (!in_number) {
-                    // push a number index in place of a number
-                    arr.push((counter++).toString());
-                }
-                in_number=true;
-            }
-            // assuming a number can only end with:
-            if (c == ',' || c == '}' || c == ']' || /\s/.test(c)){
-                if (in_number) {
-                    // push the accumulated number string into the
-                    // number index
-                    index.push(numberAcc.join(''));
-                    numberAcc = [];
-                }
-                in_number=false;
-            }
-        }
-        // push char if in string or is not a whitespace
-        if (in_number) {
-            numberAcc.push(c);
-        } else if (in_string || !/\s/.test(c)) {
-            arr.push(c);
-        }
+        if (Array.isArray(json))
+            return caseArray(json)
+
+        if (typeof json === "object")
+            return caseObject(json)
+
+        throw "Imposible happened: JSON object is incorrect: "
+            + json.toString() + " " + typeof json;
+    }
+exports._caseAeson = _caseAeson
+
+// Hack zone.
+// BigNumberFixed is instanceof BigNumber but
+// redefines toJSON method to ensure no exponential notation
+// in toJSON result, for integer number x, where |x| <= 2^512
+
+const twoIn512 = BigNumber(2).pow(512)
+
+class BigNumberFixed extends BigNumber {
+    constructor(bignum) {
+        super(bignum)
+    }
+    toJSON() {
+        if (this.isInteger() && this.abs().lte(twoIn512))
+            return this.toFixed()
+
+        return super.toJSON()
+    }
+}
+
+//---
+
+const traverseFormattingBigNumber = json => {
+    const stack = []
+
+    const go = _caseAeson
+        (identity)                                    // caseNull
+        (identity)                                    // caseBoolean
+        (bn => new BigNumberFixed(bn))                // caseBigNumber
+        (identity)                                    // caseString
+        (arr => {                                     // caseArray
+            const tmp = []
+            arr.forEach((json, idx) => {
+                // push on stack a "thunk", which
+                // when evaluated, will mutate tmp array later
+                stack.push(() => tmp[idx] = go(json))
+            })
+            return tmp
+        })
+        (object => {                                  // caseObject
+            const tmp = {}
+            // reverse here is to preserver order of field
+            // thay are pushed on stack, so will be processed
+            // in reverse order
+            Object.keys(object).reverse().forEach(key => {
+                stack.push(() => tmp[key] = go(object[key]))
+            })
+            return tmp
+        })
+
+    const result = go(json)
+
+    // evaluate all thunks on stack while
+    // there are no more thunks to evaluate
+    // initial thunks pushed on stack
+    // dring evaluation of `go(json)` upper
+    while (stack.length !== 0)
+        stack.pop()()
+
+    return result
+}
+
+exports.stringifyAeson = json => JSONbig.stringify(traverseFormattingBigNumber(json))
+
+exports.parseAeson = Nothing => Just => jsonStr => {
+    try {
+        return Just(JSONbig.parse(jsonStr))
+    } catch (err) {
+        return Nothing
+    }
+}
+
+// ---
+
+const constant = x => _ => x
+
+// Compare two arrays
+const arrEq = (a, b) =>{
+    // a is referentially equal to b
+    // i.e they are the same array and
+    // thus are equal
+    if (a === b)
+      return true
+
+    // if arrays have different length
+    // we don't want to compare them
+    // they are not equal
+    if (a.length !== b.length)
+      return false
+
+    // Loop here is better than something like:
+    //
+    // return Array.from(a)
+    //   .reduce((acc, ai, i) => acc && aesonEq(ai, b[i]), true)
+    //
+    // ... because it allows us to fail fast
+    // arrays are not equal
+    // as soon as we encounter first inequality
+    for (let i = 0; i < a.length; i++)
+        if (!aesonEq(a[i], b[i]))
+            return false
+
+    // Are you still here?
+    return true
+}
+
+const objectEq = (a, b) => {
+    // referentially equal
+    if (a === b)
+      return true
+
+    const aKeys = Object.keys(a)
+    const bKeys = Object.keys(b)
+
+    // if objects have different sets of keys
+    // they are not equal, but to compare lists of keys,
+    // we have to sort them first. This is pretty expensive,
+    // If these lists have the same length, and
+    // for every `key` from `a`, a[key] equals b[key],
+    // then objects are equal
+    if (aKeys.length !== bKeys.length)
+        return false
+
+    for (let i = 0; i < aKeys.length; i++) {
+        let key = aKeys[i]
+        if (!aesonEq(a[key], b[key]))
+            return false
     }
 
-    // single number case
-    if (in_number) {
-        index.push(numberAcc.join(''));
+    return true
+}
+
+// Comparable tags for each possible aeson "constructor"
+const tNull = "null"
+const tBool = "bool"
+const tBNum = "bnum"
+const tStr  = "str"
+const tArr  = "arr"
+const tObj  = "obj"
+
+const typeOf = _caseAeson
+    (constant(tNull))
+    (constant(tBool))
+    (constant(tBNum))
+    (constant(tStr))
+    (constant(tArr))
+    (constant(tObj))
+
+const aesonEq = (a, b) => {
+    // If "constructors" are different
+    // aesons are not equal
+    const tOfA = typeOf(a)
+    if (tOfA !== typeOf(b))
+        return false
+
+    switch (tOfA) {
+        case tNull: return true
+        case tBool: return a === b
+        case tBNum: return a.eq(b)
+        case tStr : return a === b
+        case tArr : return arrEq(a, b)
+        case tObj : return objectEq(a, b)
     }
 
-    return [arr.join(''), index];
-};
+    throw "Imposible happened: Unexpected type of JSON: " + a.toString
+}
+
+exports.aesonEq = a => b => aesonEq(a, b)
