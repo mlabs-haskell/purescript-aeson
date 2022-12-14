@@ -46,33 +46,45 @@ exports._caseAeson = _caseAeson
 // Hack zone.
 // BigNumberFixed is instanceof BigNumber but
 // redefines toJSON method to ensure no exponential notation
-// in toJSON result, which JSONbig.stringify use internally
+// in toJSON result, for integer number x, where |x| <= 2^512
 
-class BigNumberFixed extends BigNumber {
-    constructor(bignum) {
-        super(bignum)
-    }
-    toJSON() {
-        return this.toFixed()
-    }
-}
+// const twoIn512 = BigNumber(2).pow(512)
+
+// class BigNumberFixed extends BigNumber {
+//     constructor(bignum) {
+//         super(bignum)
+//     }
+//     toJSON() {
+//         if (this.isInteger() && this.abs().lte(twoIn512)) {
+//             console.log(this.toString())
+//             return this.toFixed()
+//         }
+
+//         return this.toJSON()
+//     }
+// }
 
 //---
 
-const traverseFormattingBigInt = _caseAeson
-    (identity)                                 // caseNull
-    (identity)                                 // caseBoolean
-    (bn => new BigNumberFixed(bn))             // caseBigNumber
-    (identity)                                 // caseString
-    (arr => arr.map(traverseFormattingBigInt)) // caseArray
-    (object => {                               // caseObject
-        const tmp = {}
-        Object.keys(object).forEach(key =>
-            tmp[key] = traverseFormattingBigInt(object[key]))
-        return tmp
-    })
+// This one is not stack-safe and can
+// throw "Maximum call stack size exceeded" for big json's in practice
+// thus, commented until we found better way to perform this.
 
-exports.stringifyAeson = json => JSONbig.stringify(json)
+const traverseFormattingBigNumber = identity
+// _caseAeson
+//     (identity)                                    // caseNull
+//     (identity)                                    // caseBoolean
+//     (bn => new BigNumberFixed(bn))                // caseBigNumber
+//     (identity)                                    // caseString
+//     (arr => arr.map(traverseFormattingBigNumber)) // caseArray
+//     (object => {                                  // caseObject
+//         const tmp = {}
+//         Object.keys(object).forEach(key =>
+//             tmp[key] = traverseFormattingBigNumber(object[key]))
+//         return tmp
+//     })
+
+exports.stringifyAeson = json => JSONbig.stringify(traverseFormattingBigNumber(json))
 
 exports.parseAeson = Nothing => Just => jsonStr => {
     try {
