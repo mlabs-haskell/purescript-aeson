@@ -93,7 +93,6 @@ bigNumberStrGen { intDigitsUpTo, fracDigitsUpTo, expDigitsUpTo } = do
         else map (i <> _) $ go (_size - lenI)
 
   negSign <- arbitrary
-  -- forceSign <- arbitrary
 
   withFractional <- arbitrary
 
@@ -106,13 +105,11 @@ bigNumberStrGen { intDigitsUpTo, fracDigitsUpTo, expDigitsUpTo } = do
   expPart <- largeIntStr expDigitsUpTo
 
   let
-    number = when negSign "-" -- sign
-
+    number = when negSign "-"
       <> intPart
       <> when withFractional ("." <> fracPart)
       <> when withExp ("e" <> expSign <> expPart)
       where
-      -- sign = if negSign then "-" else when forceSign "+"
       expSign = if negExpSign then "-" else when forceExpSign "+"
       when true x = x
       when false _ = ""
