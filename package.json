@@ -1,5 +1,5 @@
 {
   "dependencies": {
-    "@khavryliuk/json-bigint": "^1.0.0"
+    "@mlabs-haskell/json-bigint": "^1.0.0"
   }
 }

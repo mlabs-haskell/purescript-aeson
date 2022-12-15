@@ -1,6 +1,6 @@
 const {BigNumber} = require("bignumber.js")
 
-const JSONbig = require("@khavryliuk/json-bigint")({})
+const JSONbig = require("@mlabs-haskell/json-bigint")({})
 
 //---
 
