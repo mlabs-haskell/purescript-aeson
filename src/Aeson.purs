@@ -103,11 +103,12 @@ import Data.Argonaut (JsonDecodeError(..), printJsonDecodeError) as DataArgonaut
 import Data.Argonaut (fromArray, fromObject, jsonNull) as Argonaut
 import Data.Argonaut.Encode.Encoders (encodeBoolean, encodeString)
 import Data.Array (cons, fromFoldable, head, length, tail, toUnfoldable, (!!))
-import Data.Bifunctor (lmap)
+import Data.Bifunctor (lmap, rmap)
 import Data.BigInt (BigInt)
 import Data.BigInt as BigInt
 import Data.BigNumber (BigNumber, isInteger)
 import Data.BigNumber as BigNumber
+import Data.Bitraversable (rtraverse)
 import Data.Either (Either(Right, Left), fromRight, note)
 import Data.Foldable (foldM, intercalate)
 import Data.Int as Int
@@ -672,7 +673,8 @@ instance (Ord a, DecodeAeson a) => DecodeAeson (Set a) where
   decodeAeson x = Set.fromFoldable <$> (decodeAeson x :: _ (Array _))
 
 instance (Ord k, DecodeAeson k, DecodeAeson v) => DecodeAeson (Map k v) where
-  decodeAeson x = Map.fromFoldable <$> (decodeAeson x :: _ (Array _))
+  decodeAeson x = Map.fromFoldable <$>
+    (traverse (rtraverse decodeAeson) =<< (decodeAeson x :: _ (Array (Tuple k Aeson))))
 
 instance DecodeAeson a => DecodeAeson (Maybe a) where
   decodeAeson aeson =
@@ -818,7 +820,7 @@ else instance
   , EncodeAeson b
   ) =>
   EncodeTupleAux (Tuple a b) where
-  tupleToArray (Tuple a b) = [ encodeAeson a, encodeAeson b ]
+    tupleToArray (Tuple a b) = [ encodeAeson a, encodeAeson b ]
 
 instance EncodeTupleAux (Tuple a b) => EncodeAeson (Tuple a b) where
   -- Encodes nested tuple of arbitrary size, (like Boolean /\ Boolean /\ Boolean /\ ...)
@@ -840,7 +842,7 @@ instance (EncodeAeson a) => EncodeAeson (Set a) where
   encodeAeson x = encodeAeson $ (Set.toUnfoldable x :: Array _)
 
 instance (EncodeAeson k, EncodeAeson v) => EncodeAeson (Map k v) where
-  encodeAeson x = encodeAeson $ (Map.toUnfoldable x :: Array _)
+  encodeAeson x = encodeAeson $ map (rmap encodeAeson) (Map.toUnfoldable x :: Array _)
 
 instance EncodeAeson a => EncodeAeson (Maybe a) where
   encodeAeson Nothing = aesonNull

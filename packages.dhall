@@ -105,8 +105,8 @@ in  upstream
 -------------------------------
 -}
 let upstream =
-      https://github.com/purescript/package-sets/releases/download/psc-0.14.5-20211116/packages.dhall
-        sha256:7ba810597a275e43c83411d2ab0d4b3c54d0b551436f4b1632e9ff3eb62e327a
+      https://github.com/purescript/package-sets/releases/download/psc-0.15.4-20230105/packages.dhall
+        sha256:3e9fbc9ba03e9a1fcfd895f65e2d50ee2f5e86c4cd273f3d5c841b655a0e1bda
 
 let additions =
       { sequences =
@@ -129,8 +129,8 @@ let additions =
           , "unfoldable"
           , "unsafe-coerce"
           ]
-        , repo = "https://github.com/hdgarrood/purescript-sequences"
-        , version = "v3.0.2"
+        , repo = "https://github.com/garganscript/purescript-sequences"
+        , version = "cae456c1a7463785ad33981a93e7a9cb5fc7872c"
         }
       , mote =
         { dependencies = [ "these", "transformers", "arrays" ]
@@ -149,9 +149,9 @@ let additions =
           , "prelude"
           , "tuples"
           ]
-        , repo = "https://github.com/mlabs-haskell/purescript-bignumber"
-        , version = "705923edd892a3397b90d28ce7db9a7181dcd599"
+        , repo = "https://github.com/errfrom/purescript-bignumber"
+        , version = "9b3179ad07428d189e42a7a205aab9c7c4849d4a"
         }
       }
 
-in upstream // additions
+in  upstream // additions
