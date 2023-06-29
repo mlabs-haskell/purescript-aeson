@@ -1,6 +1,5 @@
 {
   "dependencies": {
-    "@mlabs-haskell/json-bigint": "^1.0.0",
-    "bignumber.js": "^9.1.1"
+    "@mlabs-haskell/json-bigint": "^1.0.0"
   }
 }

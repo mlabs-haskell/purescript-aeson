@@ -1,4 +1,4 @@
-import {BigNumber} from "bignumber.js";
+import BigNumber from "bignumber.js";
 
 import * as mkJSONbig from "@mlabs-haskell/json-bigint";
 const JSONbig = mkJSONbig({});
@@ -108,16 +108,13 @@ export function stringifyAeson(json) {
     return JSONbig.stringify(traverseFormattingBigNumber(json));
 }
 
-export function parseAeson(Nothing) {
-    return Just => jsonStr => {
-        try {
-            return Just(JSONbig.parse(jsonStr))
-        } catch (err) {
-            return Nothing
-        }
-    };
+export const parseAeson = Nothing => Just => jsonStr => {
+    try {
+        return Just(JSONbig.parse(jsonStr))
+    } catch (err) {
+        return Nothing
+    }
 }
-
 // ---
 
 const constant = x => _ => x
