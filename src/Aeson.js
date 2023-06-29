@@ -1,7 +1,6 @@
 import BigNumber from "bignumber.js";
 
-import * as mkJSONbig from "@mlabs-haskell/json-bigint";
-const JSONbig = mkJSONbig({});
+import JSONbig from "@mlabs-haskell/json-bigint";
 
 //---
 
