@@ -1,18 +1,18 @@
-const {BigNumber} = require("bignumber.js")
+import BigNumber from "bignumber.js";
 
-const JSONbig = require("@mlabs-haskell/json-bigint")({})
+import JSONbig from "@mlabs-haskell/json-bigint";
 
 //---
 
 const identity = x => x
-exports.fromBoolean = identity
-exports.fromString = identity
-exports.fromFiniteBigNumber = identity
-exports.fromArray = identity
-exports.fromObject = identity
-exports.aesonNull = null
+export const fromBoolean = identity
+export const fromString = identity
+export const fromFiniteBigNumber = identity
+export const fromArray = identity
+export const fromObject = identity
+export const aesonNull = null
 
-const _caseAeson =
+export const _caseAeson =
     caseNull =>
     caseBoolean =>
     caseBigNumber =>
@@ -41,7 +41,6 @@ const _caseAeson =
         throw "Imposible happened: JSON object is incorrect: "
             + json.toString() + " " + typeof json;
     }
-exports._caseAeson = _caseAeson
 
 // Hack zone.
 // BigNumberFixed is instanceof BigNumber but
@@ -104,16 +103,17 @@ const traverseFormattingBigNumber = json => {
     return result
 }
 
-exports.stringifyAeson = json => JSONbig.stringify(traverseFormattingBigNumber(json))
+export function stringifyAeson(json) {
+    return JSONbig.stringify(traverseFormattingBigNumber(json));
+}
 
-exports.parseAeson = Nothing => Just => jsonStr => {
+export const parseAeson = Nothing => Just => jsonStr => {
     try {
         return Just(JSONbig.parse(jsonStr))
     } catch (err) {
         return Nothing
     }
 }
-
 // ---
 
 const constant = x => _ => x
@@ -135,13 +135,13 @@ const arrEq = (a, b) =>{
     // Loop here is better than something like:
     //
     // return Array.from(a)
-    //   .reduce((acc, ai, i) => acc && aesonEq(ai, b[i]), true)
+    //   .reduce((acc, ai, i) => acc && aesonEqUncurried(ai, b[i]), true)
     //
     // ... because it allows us to fail fast
     // arrays are not equal
     // as soon as we encounter first inequality
     for (let i = 0; i < a.length; i++)
-        if (!aesonEq(a[i], b[i]))
+        if (!aesonEqUncurried(a[i], b[i]))
             return false
 
     // Are you still here?
@@ -167,7 +167,7 @@ const objectEq = (a, b) => {
 
     for (let i = 0; i < aKeys.length; i++) {
         let key = aKeys[i]
-        if (!aesonEq(a[key], b[key]))
+        if (!aesonEqUncurried(a[key], b[key]))
             return false
     }
 
@@ -190,7 +190,7 @@ const typeOf = _caseAeson
     (constant(tArr))
     (constant(tObj))
 
-const aesonEq = (a, b) => {
+const aesonEqUncurried = (a, b) => {
     // If "constructors" are different
     // aesons are not equal
     const tOfA = typeOf(a)
@@ -209,4 +209,6 @@ const aesonEq = (a, b) => {
     throw "Imposible happened: Unexpected type of JSON: " + a.toString
 }
 
-exports.aesonEq = a => b => aesonEq(a, b)
+export function aesonEq(a) {
+    return b => aesonEqUncurried(a, b);
+}

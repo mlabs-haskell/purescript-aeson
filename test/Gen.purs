@@ -6,11 +6,11 @@ import Aeson (Aeson, Finite, aesonNull, finiteBigNumber, fromArray, fromBoolean,
 import Control.Lazy (defer, fix)
 import Data.Argonaut (Json)
 import Data.Argonaut.Gen (genJson)
+import Data.Array.NonEmpty as LNA
 import Data.BigNumber (BigNumber)
 import Data.BigNumber as BigNumber
 import Data.Either (fromRight)
 import Data.Int as Int
-import Data.List.NonEmpty as LNE
 import Data.Maybe (fromJust, maybe)
 import Data.String as S
 import Data.Tuple (Tuple(Tuple))
@@ -22,7 +22,7 @@ import Test.QuickCheck (arbitrary)
 import Test.QuickCheck.Gen (Gen, chooseInt, frequency, resize, sized, vectorOf)
 
 frequency' :: Partial => forall a. Array (Tuple Number (Gen a)) -> Gen a
-frequency' = frequency <<< fromJust <<< LNE.fromFoldable
+frequency' = frequency <<< fromJust <<< LNA.fromFoldable
 
 oneOf :: forall a. Partial => Array (Gen a) -> Gen a
 oneOf arr = frequency' $ Tuple 1.0 <$> arr
