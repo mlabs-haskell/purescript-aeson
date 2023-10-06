@@ -109,30 +109,7 @@ let upstream =
         sha256:3e9fbc9ba03e9a1fcfd895f65e2d50ee2f5e86c4cd273f3d5c841b655a0e1bda
 
 let additions =
-      { sequences =
-        { dependencies =
-          [ "arrays"
-          , "assert"
-          , "console"
-          , "effect"
-          , "lazy"
-          , "maybe"
-          , "newtype"
-          , "nonempty"
-          , "partial"
-          , "prelude"
-          , "profunctor"
-          , "psci-support"
-          , "quickcheck"
-          , "quickcheck-laws"
-          , "tuples"
-          , "unfoldable"
-          , "unsafe-coerce"
-          ]
-        , repo = "https://github.com/garganscript/purescript-sequences"
-        , version = "cae456c1a7463785ad33981a93e7a9cb5fc7872c"
-        }
-      , mote =
+      { mote =
         { dependencies = [ "these", "transformers", "arrays" ]
         , repo = "https://github.com/garyb/purescript-mote"
         , version = "v1.1.0"

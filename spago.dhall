@@ -29,7 +29,6 @@ You can edit this file as you like.
   , "prelude"
   , "quickcheck"
   , "record"
-  , "sequences"
   , "spec"
   , "strings"
   , "tuples"

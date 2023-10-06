@@ -118,7 +118,6 @@ import Data.Map (Map)
 import Data.Map as Map
 import Data.Maybe (Maybe(..), fromJust, maybe)
 import Data.Number (isFinite, isNaN) as Number
-import Data.Sequence (Seq)
 import Data.Set (Set)
 import Data.Set as Set
 import Data.Symbol (class IsSymbol, reflectSymbol)
@@ -666,9 +665,6 @@ instance DecodeAeson a => DecodeAeson (L.List a) where
 instance DecodeAeson a => DecodeAeson (LL.List a) where
   decodeAeson x = toUnfoldable <$> decodeAeson x
 
-instance DecodeAeson a => DecodeAeson (Seq a) where
-  decodeAeson x = toUnfoldable <$> decodeAeson x
-
 instance (Ord a, DecodeAeson a) => DecodeAeson (Set a) where
   decodeAeson x = Set.fromFoldable <$> (decodeAeson x :: _ (Array _))
 
@@ -833,9 +829,6 @@ instance EncodeAeson a => EncodeAeson (L.List a) where
   encodeAeson = encodeAeson <<< fromFoldable
 
 instance EncodeAeson a => EncodeAeson (LL.List a) where
-  encodeAeson = encodeAeson <<< fromFoldable
-
-instance EncodeAeson a => EncodeAeson (Seq a) where
   encodeAeson = encodeAeson <<< fromFoldable
 
 instance (EncodeAeson a) => EncodeAeson (Set a) where
