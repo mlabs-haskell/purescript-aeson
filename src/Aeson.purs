@@ -104,8 +104,8 @@ import Data.Argonaut (fromArray, fromObject, jsonNull) as Argonaut
 import Data.Argonaut.Encode.Encoders (encodeBoolean, encodeString)
 import Data.Array (cons, fromFoldable, head, length, tail, toUnfoldable, (!!))
 import Data.Bifunctor (lmap, rmap)
-import Data.BigInt (BigInt)
-import Data.BigInt as BigInt
+import JS.BigInt (BigInt)
+import JS.BigInt as BigInt
 import Data.BigNumber (BigNumber, isInteger)
 import Data.BigNumber as BigNumber
 import Data.Bitraversable (rtraverse)
