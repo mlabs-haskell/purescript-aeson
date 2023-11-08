@@ -1,122 +1,61 @@
-import BigNumber from "bignumber.js";
-
 import JSONbig from "@mlabs-haskell/json-bigint";
 
-//---
+const identity = x => x;
+const constant = x => _ => x;
 
-const identity = x => x
-export const fromBoolean = identity
-export const fromString = identity
-export const fromFiniteBigNumber = identity
-export const fromArray = identity
-export const fromObject = identity
-export const aesonNull = null
+export const fromBoolean = identity;
+export const fromString = identity;
+export const fromBigInt = identity;
+export const fromFiniteNumber = identity;
+export const fromArray = identity;
+export const fromObject = identity;
+export const aesonNull = null;
 
-export const _caseAeson =
-    caseNull =>
-    caseBoolean =>
-    caseBigNumber =>
-    caseString =>
-    caseArray =>
-    caseObject =>
-    json => {
-        if (json === null)
-            return caseNull(json)
+export const caseAeson =
+    ({ caseNull,
+       caseBoolean,
+       caseFiniteNumber,
+       caseBigInt,
+       caseString,
+       caseArray,
+       caseObject,
+     }) => json => {
+         if (typeof json === "string")
+             return caseString(json);
 
-        if (typeof json === "boolean")
-            return caseBoolean(json)
+         if (Array.isArray(json))
+             return caseArray(json);
 
-        if (typeof json === "string")
-            return caseString(json)
+         if (typeof json === "object" && json !== null)
+             return caseObject(json);
 
-        if (BigNumber.isBigNumber(json))
-            return caseBigNumber(json);
+         if (typeof json === "bigint")
+             return caseBigInt(json);
 
-        if (Array.isArray(json))
-            return caseArray(json)
+         if (typeof json === "number" && !isNaN(json) && isFinite(json))
+             return caseFiniteNumber(json);
 
-        if (typeof json === "object")
-            return caseObject(json)
+         if (typeof json === "boolean")
+             return caseBoolean(json);
 
-        throw "Imposible happened: JSON object is incorrect: "
-            + json.toString() + " " + typeof json;
-    }
+         if (json === null)
+             return caseNull(json);
 
-// Hack zone.
-// BigNumberFixed is instanceof BigNumber but
-// redefines toJSON method to ensure no exponential notation
-// in toJSON result, for integer number x, where |x| <= 2^512
-
-const twoIn512 = BigNumber(2).pow(512)
-
-class BigNumberFixed extends BigNumber {
-    constructor(bignum) {
-        super(bignum)
-    }
-    toJSON() {
-        if (this.isInteger() && this.abs().lte(twoIn512))
-            return this.toFixed()
-
-        return super.toJSON()
-    }
-}
-
-//---
-
-const traverseFormattingBigNumber = json => {
-    const stack = []
-
-    const go = _caseAeson
-        (identity)                                    // caseNull
-        (identity)                                    // caseBoolean
-        (bn => new BigNumberFixed(bn))                // caseBigNumber
-        (identity)                                    // caseString
-        (arr => {                                     // caseArray
-            const tmp = []
-            arr.forEach((json, idx) => {
-                // push on stack a "thunk", which
-                // when evaluated, will mutate tmp array later
-                stack.push(() => tmp[idx] = go(json))
-            })
-            return tmp
-        })
-        (object => {                                  // caseObject
-            const tmp = {}
-            // reverse here is to preserver order of field
-            // thay are pushed on stack, so will be processed
-            // in reverse order
-            Object.keys(object).reverse().forEach(key => {
-                stack.push(() => tmp[key] = go(object[key]))
-            })
-            return tmp
-        })
-
-    const result = go(json)
-
-    // evaluate all thunks on stack while
-    // there are no more thunks to evaluate
-    // initial thunks pushed on stack
-    // dring evaluation of `go(json)` upper
-    while (stack.length !== 0)
-        stack.pop()()
-
-    return result
-}
+         throw "Imposible happened: JSON object is incorrect: "
+             +  " " + typeof json;
+     };
 
 export function stringifyAeson(json) {
-    return JSONbig.stringify(traverseFormattingBigNumber(json));
+    return JSONbig.stringify(json);
 }
 
 export const parseAeson = Nothing => Just => jsonStr => {
     try {
-        return Just(JSONbig.parse(jsonStr))
+        return Just(JSONbig.parse(jsonStr));
     } catch (err) {
-        return Nothing
+        return Nothing;
     }
-}
-// ---
-
-const constant = x => _ => x
+};
 
 // Compare two arrays
 const arrEq = (a, b) =>{
@@ -175,39 +114,44 @@ const objectEq = (a, b) => {
 }
 
 // Comparable tags for each possible aeson "constructor"
-const tNull = "null"
-const tBool = "bool"
-const tBNum = "bnum"
-const tStr  = "str"
-const tArr  = "arr"
-const tObj  = "obj"
+const tNull = "null";
+const tBool = "bool";
+const tNum = "num";
+const tStr  = "str";
+const tArr  = "arr";
+const tObj  = "obj";
+const tBigInt = "bigint";
 
-const typeOf = _caseAeson
-    (constant(tNull))
-    (constant(tBool))
-    (constant(tBNum))
-    (constant(tStr))
-    (constant(tArr))
-    (constant(tObj))
+const typeOf = caseAeson({
+    caseNull: constant(tNull),
+    caseBoolean: constant(tBool),
+    caseFiniteNumber: constant(tNum),
+    caseBigInt: constant(tBigInt),
+    caseString: constant(tStr),
+    caseArray: constant(tArr),
+    caseObject: constant(tObj)
+});
 
 const aesonEqUncurried = (a, b) => {
     // If "constructors" are different
     // aesons are not equal
-    const tOfA = typeOf(a)
+    const tOfA = typeOf(a);
+
     if (tOfA !== typeOf(b))
-        return false
+        return false;
 
     switch (tOfA) {
-        case tNull: return true
-        case tBool: return a === b
-        case tBNum: return a.eq(b)
-        case tStr : return a === b
-        case tArr : return arrEq(a, b)
-        case tObj : return objectEq(a, b)
+    case tNull: return true;
+    case tBool: return a === b;
+    case tNum: return a === b;
+    case tBigInt: return a === b;
+    case tStr : return a === b;
+    case tArr : return arrEq(a, b);
+    case tObj : return objectEq(a, b);
     }
 
-    throw "Imposible happened: Unexpected type of JSON: " + a.toString
-}
+    throw "purescript-aeson: Imposible happened: Unexpected type of JSON: " + a.toString();
+};
 
 export function aesonEq(a) {
     return b => aesonEqUncurried(a, b);

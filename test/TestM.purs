@@ -3,15 +3,14 @@ module Test.TestM where
 import Prelude
 
 import Data.Const (Const)
+import Data.Foldable (sequence_)
 import Effect (Effect)
 import Effect.Aff (Aff)
-import Data.Foldable (sequence_)
 import Effect.Class (liftEffect)
 import Mote (MoteT, Plan, foldPlan, planT)
 import Test.Spec (Spec, describe, it)
 import Test.Spec.Reporter (consoleReporter)
 import Test.Spec.Runner (runSpec)
-
 
 type TestPlanM a = MoteT (Const Void) (Effect Unit) Aff a
 

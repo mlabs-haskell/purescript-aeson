@@ -2,21 +2,19 @@ module Test.Gen where
 
 import Prelude
 
-import Aeson (Aeson, Finite, aesonNull, finiteBigNumber, fromArray, fromBoolean, fromFiniteBigNumber, fromObject, fromString)
-import Control.Lazy (defer, fix)
+import Aeson (Aeson, aesonNull, fromArray, fromBigInt, fromBoolean, fromObject, fromString)
+import Control.Lazy (defer)
 import Data.Argonaut (Json)
 import Data.Argonaut.Gen (genJson)
 import Data.Array.NonEmpty as LNA
-import Data.BigNumber (BigNumber)
-import Data.BigNumber as BigNumber
-import Data.Either (fromRight)
 import Data.Int as Int
-import Data.Maybe (fromJust, maybe)
+import Data.Maybe (fromJust, fromMaybe)
 import Data.String as S
 import Data.Tuple (Tuple(Tuple))
 import Data.Tuple.Nested ((/\))
-import Data.Typelevel.Undefined (undefined)
 import Foreign.Object as FO
+import JS.BigInt (BigInt)
+import JS.BigInt as BigInt
 import Partial.Unsafe (unsafePartial)
 import Test.QuickCheck (arbitrary)
 import Test.QuickCheck.Gen (Gen, chooseInt, frequency, resize, sized, vectorOf)
@@ -38,7 +36,7 @@ aesonGen = defer \_ -> unsafePartial frequency'
   [ (1.0 /\ aesonNullGen)
   , (2.0 /\ aesonBooleanGen)
   , (3.0 /\ aesonStringGen)
-  , (4.0 /\ aesonBigNumberGen defaultNumberGenConf)
+  , (4.0 /\ aesonBigIntGen defaultNumberGenConf)
   , (4.0 /\ aesonArrayGen aesonGen)
   , (4.0 /\ aesonObjectGen (Tuple <$> arbitrary <*> aesonGen))
   ]
@@ -59,24 +57,19 @@ aesonObjectGen :: Gen (Tuple String Aeson) -> Gen Aeson
 aesonObjectGen contentGen = fromObject <<< FO.fromFoldable <$>
   sizedArray contentGen
 
-
 type NumberGenConf =
   { intDigitsUpTo :: Int
-  , fracDigitsUpTo :: Int
-  , expDigitsUpTo :: Int
   }
 
 defaultNumberGenConf :: NumberGenConf
 defaultNumberGenConf =
-  { intDigitsUpTo : 100
-  , fracDigitsUpTo : 100
-  , expDigitsUpTo : 10
+  { intDigitsUpTo: 100
   }
 
 -- Generates number string of form
--- [-]<digits>[.<digits>][+/-/][e<digits>]
-bigNumberStrGen :: NumberGenConf ->Gen String
-bigNumberStrGen { intDigitsUpTo, fracDigitsUpTo, expDigitsUpTo } = do
+-- [-]<digits>
+bigIntStrGen :: NumberGenConf -> Gen String
+bigIntStrGen { intDigitsUpTo } = do
   let
     -- Returns "integer string", of length from 1 up to size
     -- if size = 0 returns "0"
@@ -91,43 +84,23 @@ bigNumberStrGen { intDigitsUpTo, fracDigitsUpTo, expDigitsUpTo } = do
         let lenI = S.length i
         if lenI >= _size then pure $ S.take _size i
         else map (i <> _) $ go (_size - lenI)
-
   negSign <- arbitrary
-
-  withFractional <- arbitrary
-
-  withExp <- arbitrary
-  negExpSign <- arbitrary
-  forceExpSign <- arbitrary
-
   intPart <- largeIntStr intDigitsUpTo
-  fracPart <- largeIntStr fracDigitsUpTo
-  expPart <- largeIntStr expDigitsUpTo
-
   let
-    number = when negSign "-"
-      <> intPart
-      <> when withFractional ("." <> fracPart)
-      <> when withExp ("e" <> expSign <> expPart)
+    number = when negSign "-" <> intPart
       where
-      expSign = if negExpSign then "-" else when forceExpSign "+"
       when true x = x
       when false _ = ""
-
   pure number
 
 ----
 
-bigNumberGen :: NumberGenConf -> Gen BigNumber
-bigNumberGen cfg =
-  (fromRight undefined <<< BigNumber.parseBigNumber) <$> bigNumberStrGen cfg
+bigIntGen :: NumberGenConf -> Gen BigInt
+bigIntGen cfg =
+  (fromMaybe (BigInt.fromInt 0) <<< BigInt.fromString) <$> bigIntStrGen cfg
 
-finiteBigNumberGen :: NumberGenConf -> Gen (Finite BigNumber)
-finiteBigNumberGen cfg = fix \self ->
-  maybe self pure <<< finiteBigNumber =<< bigNumberGen cfg
-
-aesonBigNumberGen :: NumberGenConf -> Gen Aeson
-aesonBigNumberGen cfg = fromFiniteBigNumber <$> finiteBigNumberGen cfg
+aesonBigIntGen :: NumberGenConf -> Gen Aeson
+aesonBigIntGen cfg = fromBigInt <$> bigIntGen cfg
 
 ----
 

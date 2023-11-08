@@ -114,20 +114,10 @@ let additions =
         , repo = "https://github.com/garyb/purescript-mote"
         , version = "v1.1.0"
         }
-      , bignumber =
-        { dependencies =
-          [ "console"
-          , "effect"
-          , "either"
-          , "exceptions"
-          , "functions"
-          , "integers"
-          , "partial"
-          , "prelude"
-          , "tuples"
-          ]
-        , repo = "https://github.com/errfrom/purescript-bignumber"
-        , version = "9b3179ad07428d189e42a7a205aab9c7c4849d4a"
+      , js-bigints =
+        { dependencies = [ "integers", "maybe", "prelude" ]
+        , repo = "https://github.com/purescript-contrib/purescript-js-bigints"
+        , version = "36a7d8ac75a7230043ae511f3145f9ed130954a9"
         }
       }
 
