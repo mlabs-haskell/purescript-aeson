@@ -103,7 +103,7 @@ import Data.List.Lazy as LL
 import Data.Map (Map)
 import Data.Map as Map
 import Data.Maybe (Maybe(..), fromJust, maybe)
-import Data.Number (isFinite, isNaN) as Number
+import Data.Number (isFinite, isNaN, round) as Number
 import Data.Set (Set)
 import Data.Set as Set
 import Data.Symbol (class IsSymbol, reflectSymbol)
@@ -196,7 +196,10 @@ jsonToAeson = fix \self -> caseJson
   (const aesonNull)
   (fromBoolean)
   -- Valid json can not contain Infinity on NaN, thus it is safe
-  (unsafePartial fromJust <<< map fromFiniteNumber <<< finiteNumber)
+  (\n ->
+    if Number.round n == n
+    then fromBigInt $ unsafePartial fromJust $ BigInt.fromNumber n
+    else fromFiniteNumber $ unsafePartial fromJust $ finiteNumber n)
   (fromString)
   (fromArray <<< map self)
   (fromObject <<< map self)
