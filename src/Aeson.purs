@@ -122,7 +122,7 @@ import Record as Record
 import Type.Prelude (Proxy(Proxy))
 import Untagged.Union (class InOneOf, type (|+|), asOneOf)
 
--- | A piece of JSON where all numbers are represented as `BigNumber` (from bignumber.js)
+-- | A piece of JSON where all numbers are represented as `BigInt`
 foreign import data Aeson :: Type
 
 foreign import aesonEq :: Aeson -> Aeson -> Boolean
@@ -138,8 +138,6 @@ class DecodeAeson (a :: Type) where
 
 ---
 
--- | Newtype around `a`. `a` can be either `Number` or `BigNumber`.
--- |
 -- | `Finite Number` is just like `Number` but can not be an `Infinity` or `NaN`.
 -- | Underlying JSON parser ensures parsed numbers are not `NaN` or `Infinity`.
 -- | You can construct `Finite Number` using `finiteNumber` smart constructor.
@@ -197,8 +195,7 @@ jsonToAeson :: Json -> Aeson
 jsonToAeson = fix \self -> caseJson
   (const aesonNull)
   (fromBoolean)
-  -- Valid json can not contain Infinity on NaN, thus
-  -- assume BigNumber.fromNumber always finite here
+  -- Valid json can not contain Infinity on NaN, thus it is safe
   (unsafePartial fromJust <<< map fromFiniteNumber <<< finiteNumber)
   (fromString)
   (fromArray <<< map self)
@@ -345,24 +342,17 @@ caseAesonArray def f = caseAeson (constAesonCases def # _ { caseArray = f })
 caseAesonBoolean :: forall (a :: Type). a -> (Boolean -> a) -> Aeson -> a
 caseAesonBoolean def f = caseAeson (constAesonCases def # _ { caseBoolean = f })
 
--- | `caseAesonBigNumber` specialized to `Int` (fails if no parse)
+-- | `caseAesonBigInt` specialized to `Int` (fails if no parse)
 caseAesonInt :: forall (a :: Type). a -> (Int -> a) -> Aeson -> a
 caseAesonInt def f = maybe def f <<< caseAesonBigInt Nothing \bn ->
-  -- While in Int.toNumber doc claims that only integers withing Int bounds
-  -- result in Just _, this is not particularly true.
-  -- The reason is, that JS has no notion of integers, and all numbers are
-  -- stored as IEEE 754 64-bit floats.
-  -- Thus 1.0 and 1.0000000000000001 are indistiguishable in this level
-  -- and Int.fromFiniteNumber happily parse both as Just 1
-  -- BigNumber.isInteger has better precision, and helps us to separate cases here.
   BigInt.toInt bn
 
--- | `caseAesonBigNumber` specialized to `UInt` (fails if no parse)
+-- | `caseAesonBigInt` specialized to `UInt` (fails if no parse)
 caseAesonUInt :: forall (a :: Type). a -> (UInt -> a) -> Aeson -> a
 caseAesonUInt def f = maybe def f <<< caseAesonBigInt Nothing
   (UInt.fromString <<< BigInt.toString)
 
--- | `caseAesonBigNumber` specialized to `BigInt` (fails if no parse)
+-- | `caseAesonBigInt` specialized to `BigInt` (fails if no parse)
 caseAesonBigInt :: forall (a :: Type). a -> (BigInt -> a) -> Aeson -> a
 caseAesonBigInt def f = caseAeson (constAesonCases def # _ { caseBigInt = f })
 
