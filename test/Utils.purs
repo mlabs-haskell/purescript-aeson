@@ -9,8 +9,7 @@ import Prelude
 import Data.Maybe (Maybe(Just, Nothing))
 import Effect.Aff (error)
 import Effect.Class (class MonadEffect, liftEffect)
-import Effect.Exception (throwException, throw)
-
+import Effect.Exception (throw, throwException)
 
 -- | Test a boolean value, throwing the provided string as an error if `false`
 assertTrue

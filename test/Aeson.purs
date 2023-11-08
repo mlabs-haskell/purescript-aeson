@@ -7,11 +7,7 @@ import Aeson
   , JsonDecodeError(..)
   , aesonNull
   , caseAesonArray
-  , caseAesonBigInt
-  , caseAesonBigNumber
   , caseAesonBoolean
-  , caseAesonFiniteBigNumber
-  , caseAesonFiniteNumber
   , caseAesonInt
   , caseAesonNull
   , caseAesonObject
@@ -20,11 +16,9 @@ import Aeson
   , decodeAeson
   , decodeJsonString
   , encodeAeson
-  , finiteBigNumber
   , fromArray
   , fromBigInt
   , fromBoolean
-  , fromFiniteBigNumber
   , fromInt
   , fromObject
   , fromString
@@ -34,12 +28,9 @@ import Aeson
   , getFieldOptional'
   , getNestedAeson
   , isArray
-  , isBigInt
-  , isBigNumber
   , isBoolean
   , isInt
   , isNull
-  , isNumber
   , isObject
   , isString
   , isUInt
@@ -47,8 +38,6 @@ import Aeson
   , parseJsonStringToAeson
   , stringifyAeson
   , toArray
-  , toBigInt
-  , toBigNumber
   , toBoolean
   , toInt
   , toNull
@@ -57,40 +46,40 @@ import Aeson
   , toString
   , toStringifiedNumbersJson
   , toUInt
-  , unpackFinite
   )
+import Aeson as Aeson
 import Control.Lazy (fix)
 import Data.Argonaut (Json, caseJson)
 import Data.Argonaut as Argonaut
-import Data.BigNumber as BigNumber
 import Data.BooleanAlgebra (implies)
 import Data.Either (Either(..), fromRight, hush, isLeft)
 import Data.Foldable (all)
 import Data.Map.Gen as Map
 import Data.Maybe (Maybe(..), fromJust, isJust)
-import Data.Number as Number
 import Data.Set as Set
 import Data.Tuple (Tuple(Tuple))
 import Data.Tuple.Nested (type (/\), (/\))
 import Data.Typelevel.Undefined (undefined)
+import Data.UInt (UInt)
 import Data.UInt as UInt
+import JS.BigInt (BigInt)
+import JS.BigInt as BigInt
 import Mote (test)
 import Partial.Unsafe (unsafePartial)
 import Test.Gen
   ( aesonArrayGen
-  , aesonBigNumberGen
   , aesonGen
   , aesonNullGen
   , aesonObjectGen
   , aesonStringGen
-  , bigNumberStrGen
+  , bigIntGen
+  , bigIntStrGen
   , defaultNumberGenConf
-  , finiteBigNumberGen
   , jsonGen
   , oneOf
   , sizedArray
   )
-import Test.QuickCheck (arbitrary, quickCheckGen')
+import Test.QuickCheck (arbitrary, quickCheckGen', (<?>), (===))
 import Test.Spec.Assertions (shouldEqual)
 import Test.TestM (TestPlanM)
 import Test.Utils (assertTrue_)
@@ -108,11 +97,14 @@ suite = do
       error = Left $ TypeMismatch "JSON String"
     decodeJsonString "{" `shouldEqual` error
 
+  test "BigInt string generator" do
+    quickCheckGen' 10000 do
+      bigIntStr <- bigIntStrGen defaultNumberGenConf
+      pure $ (BigInt.fromString bigIntStr /= Nothing) <?> bigIntStr
   -- Round trip Aeson -> String -> Aeson should be id
   test "Roud trip: Aeson -> String -> Aeson" $
     quickCheckGen' 10000 do
       aeson <- aesonGen
-
       pure $ Right aeson == parseJsonStringToAeson (stringifyAeson aeson)
 
   -- Test parser quirks
@@ -120,12 +112,10 @@ suite = do
   -- or fail in case number is Infinite
   test "JS-side parser parse only finite and non-nan numbers" $
     quickCheckGen' 10000 do
-      numberStr <- bigNumberStrGen defaultNumberGenConf
+      numberStr <- bigIntStrGen defaultNumberGenConf
 
       let
-        aesonFromFbn = do
-          bn <- hush $ BigNumber.parseBigNumber numberStr
-          fromFiniteBigNumber <$> finiteBigNumber bn
+        aesonFromFbn = Aeson.fromBigInt <$> BigInt.fromString numberStr
 
         aesonFromStr = hush (parseJsonStringToAeson numberStr)
 
@@ -188,110 +178,54 @@ suite = do
         && isJust (toObject aeson)
         && caseAesonObject Nothing (Just <<< fromObject) aeson == Just aeson
 
-  test "BigNumber encoding/decoding and functions coherence" $
-    quickCheckGen' 10000 do
-      aeson <- aesonBigNumberGen defaultNumberGenConf
-      pure $
-        ( flip (caseAesonBigNumber false) aeson \bn ->
-            BigNumber.isFinite bn && not (BigNumber.isNaN bn)
-        )
-          && isBigNumber aeson
-          && isJust (toBigNumber aeson)
-          && caseAesonFiniteBigNumber Nothing (Just <<< fromFiniteBigNumber) aeson == Just aeson
+  test "Number encoding/decoding" $ do
+    assertTrue_ $ (toNumber <$> parseJsonStringToAeson "1.0") == Right (Just 1.0)
+    assertTrue_ $ (toNumber <$> parseJsonStringToAeson "1.0000000000000001") == Right
+      (Just 1.0000000000000001)
 
   test "Int encoding/decoding and functions coherence" $ do
-    assertTrue_ $ (toInt <$> parseJsonStringToAeson "1.0") == Right (Just 1)
-    assertTrue_ $ (toInt <$> parseJsonStringToAeson "1.0000000000000001") == Right (Nothing)
+    assertTrue_ $ (toInt <$> parseJsonStringToAeson "1.0") == Right Nothing
+    assertTrue_ $ (toInt <$> parseJsonStringToAeson "1.0000000000000001") == Right Nothing
 
     quickCheckGen' 10000 do
-      fbn <- finiteBigNumberGen defaultNumberGenConf
+      bn <- bigIntGen defaultNumberGenConf { intDigitsUpTo = 3 }
       let
-        aeson = fromFiniteBigNumber fbn
-        bn = unpackFinite fbn
+        aeson = fromBigInt bn
 
-      let
-        intInBounds =
-          BigNumber.isInteger bn
-            && BigNumber.fromInt bottom <= bn
-            && bn <= BigNumber.fromInt top
-
-      let
         coherence =
           isInt aeson
             && isJust (toInt aeson)
             && caseAesonInt Nothing (Just <<< fromInt) aeson == Just aeson
 
-      pure $ intInBounds `iff` coherence
+      pure coherence
 
   test "UInt encoding/decoding and functions coherence" $ do
-    assertTrue_ $ (toUInt <$> parseJsonStringToAeson "1.0") == Right (Just (UInt.fromInt 1))
-
-    assertTrue_ $ (toUInt <$> parseJsonStringToAeson "1.0000000000000001") == Right (Nothing)
+    assertTrue_ $ (toUInt <$> parseJsonStringToAeson "1.0") == Right Nothing
+    assertTrue_ $ (toUInt <$> parseJsonStringToAeson "1.0000000000000001") == Right Nothing
 
     quickCheckGen' 10000 do
-      fbn <- finiteBigNumberGen defaultNumberGenConf
+      bn <- bigIntGen defaultNumberGenConf { intDigitsUpTo = 3 } <#> max zero
       let
-        aeson = fromFiniteBigNumber fbn
-        bn = unpackFinite fbn
+        aeson = fromBigInt bn
 
       let
         intInBounds =
-          BigNumber.isInteger bn
-            && BigNumber.fromUInt bottom <= bn
-            && bn <= BigNumber.fromUInt top
-
+          bigIntFromUInt bottom <= bn
+            && bn <= bigIntFromUInt top
       let
         coherence =
           isUInt aeson
             && isJust (toUInt aeson)
             && caseAesonUInt Nothing (Just <<< fromUInt) aeson == Just aeson
 
-      pure $ intInBounds `iff` coherence
-
-  test "BigInt encoding/decoding and functions coherence" $
-    quickCheckGen' 10000 do
-      fbn <- finiteBigNumberGen defaultNumberGenConf { expDigitsUpTo = 2 }
-      let
-        aeson = fromFiniteBigNumber fbn
-        bn = unpackFinite fbn
-
-      let
-        coherence =
-          isBigInt aeson
-            && isJust (toBigInt aeson)
-            && caseAesonBigInt Nothing (Just <<< fromBigInt) aeson == Just aeson
-
-      pure $ BigNumber.isInteger bn `iff` coherence
-
-  test "Number encoding/decoding and functions coherence" $
-    quickCheckGen' 10000 do
-      aeson <- aesonBigNumberGen defaultNumberGenConf
-
-      let
-        isFiniteNumber =
-          caseAesonBigNumber false
-            ( \bn ->
-                let
-                  n = BigNumber.toNumber bn
-                in
-                  Number.isFinite n && not (Number.isNaN n)
-            )
-            aeson
-
-      pure $ isFiniteNumber `iff`
-        ( isNumber aeson
-            && isJust (toNumber aeson)
-            && caseAesonFiniteNumber false (const true) aeson
-        )
-  -- use eqApproximate from Data.Number.Approximate here?
-  -- && caseAesonFiniteNumber Nothing (Just <<< fromFiniteNumber) aeson == Just aeson
+      pure $ intInBounds === coherence
 
   test "Maybe encoding/decoding" $ do
     quickCheckGen' 10000 do
       aeson <- unsafePartial $ oneOf [ aesonNullGen, aesonGen ]
       pure $ isNull aeson `iff` (decodeAeson aeson == Right (Nothing :: Maybe Aeson))
 
-  ----
+  -- ----
 
   let
     tstStr = "{\"a\":10,\"c\":{\"d\":\"val\"},\"e\": null}"
@@ -410,3 +344,5 @@ suite = do
       pure $
         (decodeJsonString $ stringifyAeson $ encodeAeson set) == Right set
 
+bigIntFromUInt :: UInt -> BigInt
+bigIntFromUInt x = unsafePartial $ fromJust $ BigInt.fromString $ UInt.toString x

@@ -10,7 +10,6 @@ You can edit this file as you like.
   , "argonaut-core"
   , "arrays"
   , "bifunctors"
-  , "bignumber"
   , "const"
   , "control"
   , "effect"
