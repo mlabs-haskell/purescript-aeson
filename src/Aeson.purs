@@ -98,6 +98,7 @@ import Data.Bifunctor (lmap, rmap)
 import Data.Bitraversable (rtraverse)
 import Data.Either (Either(Right, Left), note)
 import Data.Foldable (foldM, intercalate)
+import Data.Int as Int
 import Data.List as L
 import Data.List.Lazy as LL
 import Data.Map (Map)
@@ -196,10 +197,10 @@ jsonToAeson = fix \self -> caseJson
   (const aesonNull)
   (fromBoolean)
   -- Valid json can not contain Infinity on NaN, thus it is safe
-  (\n ->
-    if Number.round n == n
-    then fromBigInt $ unsafePartial fromJust $ BigInt.fromNumber n
-    else fromFiniteNumber $ unsafePartial fromJust $ finiteNumber n)
+  ( \n ->
+      if Number.round n == n then fromBigInt $ unsafePartial fromJust $ BigInt.fromNumber n
+      else fromFiniteNumber $ unsafePartial fromJust $ finiteNumber n
+  )
   (fromString)
   (fromArray <<< map self)
   (fromObject <<< map self)
@@ -361,7 +362,13 @@ caseAesonBigInt def f = caseAeson (constAesonCases def # _ { caseBigInt = f })
 
 -- | `caseAesonFiniteNumber` specialized to `Finite Number` (fails if no parse)
 caseAesonFiniteNumber :: forall (a :: Type). a -> (Finite Number -> a) -> Aeson -> a
-caseAesonFiniteNumber def f = caseAeson (constAesonCases def # _ { caseFiniteNumber = f })
+caseAesonFiniteNumber def f =
+  caseAeson
+    ( constAesonCases def # _
+        { caseFiniteNumber = f
+        , caseBigInt = \b -> maybe def f (Finite <<< Int.toNumber <$> BigInt.toInt b)
+        }
+    )
 
 -- | `caseAesonNumber` specialized to `Number` (fails if no parse)
 caseAesonNumber :: forall (a :: Type). a -> (Number -> a) -> Aeson -> a
