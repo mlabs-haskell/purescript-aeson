@@ -89,8 +89,22 @@ import Prelude
 
 import Control.Alt ((<|>))
 import Control.Lazy (defer, fix)
-import Data.Argonaut (Json, JsonDecodeError(..), caseJson)
-import Data.Argonaut (JsonDecodeError(..), printJsonDecodeError) as DataArgonautReexport
+import Data.Argonaut
+  ( Json
+  , JsonDecodeError(MissingValue, AtKey, TypeMismatch, AtIndex)
+  , caseJson
+  )
+import Data.Argonaut
+  ( JsonDecodeError
+      ( TypeMismatch
+      , UnexpectedValue
+      , AtIndex
+      , AtKey
+      , Named
+      , MissingValue
+      )
+  , printJsonDecodeError
+  ) as DataArgonautReexport
 import Data.Argonaut (fromArray, fromObject, jsonNull) as Argonaut
 import Data.Argonaut.Encode.Encoders (encodeBoolean, encodeNumber, encodeString)
 import Data.Array (cons, fromFoldable, head, length, tail, toUnfoldable, (!!))
@@ -103,7 +117,7 @@ import Data.List as L
 import Data.List.Lazy as LL
 import Data.Map (Map)
 import Data.Map as Map
-import Data.Maybe (Maybe(..), fromJust, maybe)
+import Data.Maybe (Maybe(Just, Nothing), fromJust, maybe)
 import Data.Number (isFinite, isNaN, round) as Number
 import Data.Set (Set)
 import Data.Set as Set

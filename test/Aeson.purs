@@ -4,7 +4,7 @@ import Prelude
 
 import Aeson
   ( Aeson
-  , JsonDecodeError(..)
+  , JsonDecodeError(TypeMismatch, AtIndex)
   , aesonNull
   , caseAesonArray
   , caseAesonBoolean
@@ -52,10 +52,10 @@ import Control.Lazy (fix)
 import Data.Argonaut (Json, caseJson)
 import Data.Argonaut as Argonaut
 import Data.BooleanAlgebra (implies)
-import Data.Either (Either(..), fromRight, hush, isLeft)
+import Data.Either (Either(Left, Right), fromRight, hush, isLeft)
 import Data.Foldable (all)
 import Data.Map.Gen as Map
-import Data.Maybe (Maybe(..), fromJust, isJust)
+import Data.Maybe (Maybe(Just, Nothing), fromJust, isJust)
 import Data.Set as Set
 import Data.Tuple (Tuple(Tuple))
 import Data.Tuple.Nested (type (/\), (/\))

@@ -1,9 +1,17 @@
 {
+  "name": "purescript-aeson",
   "type": "module",
   "dependencies": {
     "@mlabs-haskell/json-bigint": "^2.0.0"
   },
   "scripts": {
     "test": "spago test"
+  },
+  "prettier": {
+    "arrowParens": "avoid",
+    "trailingComma": "none"
+  },
+  "devDependencies": {
+    "esbuild": "^0.19.11"
   }
 }
