@@ -1,4 +1,8 @@
-import JSONbig from "@mlabs-haskell/json-bigint";
+import JSONbigConfigurable from "@mlabs-haskell/json-bigint";
+const JSONbig = JSONbigConfigurable({
+  protoAction: "error",
+  constructorAction: "preserve"
+});
 
 const identity = x => x;
 const constant = x => _ => x;
